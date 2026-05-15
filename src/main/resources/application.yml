@@ -1,0 +1,59 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: people-wiki
+  datasource:
+    url: jdbc:h2:file:${knowledge-base.data-path};AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  profiles:
+    active: local
+
+logging:
+  level:
+    org.hibernate.SQL: warn
+
+knowledge-base:
+  data-path: ${KNOWLEDGE_BASE_DATA_PATH:${user.home}/.knowledge-base/data/knowledge-base}
+  index-path: ${KNOWLEDGE_BASE_INDEX_PATH:${user.home}/.knowledge-base/index}
+  vector-index-path: ${KNOWLEDGE_BASE_VECTOR_INDEX_PATH:${user.home}/.knowledge-base/vector-index}
+  images-path: ${KNOWLEDGE_BASE_IMAGES_PATH:${user.home}/.knowledge-base/images}
+  restore-backup-path: ${KNOWLEDGE_BASE_RESTORE_BACKUP_PATH:}
+  history-max-versions: 50
+  embedding:
+    provider: ${KNOWLEDGE_BASE_EMBEDDING_PROVIDER:local-cli}
+    local-cli:
+      executable-path: ${KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_EXECUTABLE:}
+      model-path: ${KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_MODEL:}
+      pooling: ${KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_POOLING:mean}
+      normalize: ${KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_NORMALIZE:true}
+      timeout-seconds: ${KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_TIMEOUT_SECONDS:120}
+      batch-size: ${KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_BATCH_SIZE:1}
+  llm:
+    default-provider: ${KNOWLEDGE_BASE_LLM_PROVIDER:bailian}
+    timeout-seconds: ${KNOWLEDGE_BASE_LLM_TIMEOUT_SECONDS:60}
+    bailian:
+      api-key: ${BAILIAN_API_KEY:}
+      base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      model: ${BAILIAN_MODEL:qwen-plus}
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      model: ${DEEPSEEK_MODEL:deepseek-v4-flash}

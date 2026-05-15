@@ -1,0 +1,38 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:knowledge-base-test;MODE=MYSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+knowledge-base:
+  data-path: ${java.io.tmpdir}/people-wiki-test-data-${random.uuid}/knowledge-base
+  index-path: ${java.io.tmpdir}/people-wiki-test-index-${random.uuid}
+  vector-index-path: ${java.io.tmpdir}/people-wiki-test-vector-index-${random.uuid}
+  images-path: ${java.io.tmpdir}/people-wiki-test-images-${random.uuid}
+  restore-backup-path:
+  history-max-versions: 3
+  embedding:
+    provider: local-cli
+    local-cli:
+      executable-path:
+      model-path:
+      pooling: mean
+      normalize: true
+      timeout-seconds: 5
+      batch-size: 2
+  llm:
+    default-provider: bailian
+    timeout-seconds: 5
+    bailian:
+      api-key:
+      base-url: http://127.0.0.1:1
+      model: qwen-plus
+    deepseek:
+      api-key:
+      base-url: http://127.0.0.1:1
+      model: deepseek-chat

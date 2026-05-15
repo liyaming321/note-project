@@ -1,0 +1,54 @@
+# macOS / system
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.idea/
+.vscode/
+.atomcode/
+*.iml
+
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+.mvn/timing.properties
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local runtime data
+.knowledge-base/
+data/
+index/
+#images/
+*.mv.db
+*.trace.db
+*.lock.db
+
+# Logs
+logs/
+*.log
+
+# Test / coverage / temp artifacts
+coverage/
+.nyc_output/
+tmp/
+temp/
+output/
+
+# Environment files
+.env
+.env.*
+!.env.example

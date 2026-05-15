@@ -1,0 +1,31 @@
+-- SQL 变更追加记录
+-- 2026-05-13：第一阶段 MVP 使用 JPA 自动建表，未手写 SQL。
+-- 2026-05-13：第三阶段新增笔记历史版本表结构记录，仍由 JPA 自动建表。
+-- CREATE TABLE note_histories (
+--   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '历史版本ID',
+--   note_id BIGINT NOT NULL COMMENT '所属笔记',
+--   version INT NOT NULL COMMENT '历史版本号',
+--   title VARCHAR(160) NOT NULL COMMENT '历史标题',
+--   content CLOB NOT NULL COMMENT '历史原始内容',
+--   content_text CLOB NOT NULL COMMENT '历史纯文本内容',
+--   type VARCHAR(20) NOT NULL COMMENT '历史笔记类型',
+--   language VARCHAR(40) NULL COMMENT '历史代码语言',
+--   category_id BIGINT NULL COMMENT '历史分类ID',
+--   category_name VARCHAR(80) NULL COMMENT '历史分类名称',
+--   tag_names_json CLOB NOT NULL COMMENT '历史标签名称快照JSON',
+--   created_at TIMESTAMP NOT NULL COMMENT '创建时间',
+--   CONSTRAINT uk_note_histories_note_version UNIQUE (note_id, version)
+-- );
+
+-- 2026-05-13：第四阶段新增笔记自定义排序字段，仍由 JPA ddl-auto=update 自动更新。
+-- ALTER TABLE notes ADD COLUMN sort_order BIGINT NULL COMMENT '自定义排序值';
+-- UPDATE notes SET sort_order = id * 10 WHERE sort_order IS NULL;
+
+-- 2026-05-13：第六阶段新增笔记发布状态与归档字段，仍由 JPA ddl-auto=update 自动更新。
+-- ALTER TABLE notes ADD COLUMN status VARCHAR(20) DEFAULT 'PUBLISHED' COMMENT '笔记发布状态：草稿或已发布';
+-- ALTER TABLE notes ADD COLUMN archived BOOLEAN DEFAULT FALSE COMMENT '是否归档';
+-- UPDATE notes SET status = 'PUBLISHED' WHERE status IS NULL;
+-- UPDATE notes SET archived = FALSE WHERE archived IS NULL;
+
+-- 2026-05-14：新增笔记摘要字段，用于保存 LLM 或人工维护的摘要，仍由 JPA ddl-auto=update 自动更新。
+-- ALTER TABLE notes ADD COLUMN summary VARCHAR(500) NULL COMMENT 'AI或人工维护的笔记摘要';
