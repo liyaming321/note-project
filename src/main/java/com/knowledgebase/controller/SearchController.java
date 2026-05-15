@@ -5,6 +5,7 @@ import com.knowledgebase.dto.HybridSearchResultResponse;
 import com.knowledgebase.dto.PageResponse;
 import com.knowledgebase.dto.SearchResultResponse;
 import com.knowledgebase.dto.SemanticSearchResultResponse;
+import com.knowledgebase.entity.SearchMode;
 import com.knowledgebase.entity.NoteStatus;
 import com.knowledgebase.service.HybridSearchService;
 import com.knowledgebase.service.SearchService;
@@ -44,9 +45,10 @@ public class SearchController {
     }
 
     /**
-     * 搜索笔记。
+     * 通过统一入口搜索笔记。
      *
      * @param keyword 关键词
+     * @param mode 搜索模式
      * @param scope 搜索范围
      * @param tag 标签筛选
      * @param category 分类筛选
@@ -59,8 +61,9 @@ public class SearchController {
      * @return 搜索结果分页
      */
     @GetMapping
-    public ApiResponse<PageResponse<SearchResultResponse>> search(
+    public ApiResponse<PageResponse<?>> search(
             @RequestParam(name = "q", required = false) String keyword,
+            @RequestParam(defaultValue = "exact") String mode,
             @RequestParam(defaultValue = "all") String scope,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String category,
@@ -71,18 +74,45 @@ public class SearchController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size
     ) {
-        return ApiResponse.success(searchService.search(
-                keyword,
-                scope,
-                tag,
-                category,
-                language,
-                status,
-                updatedFrom,
-                updatedTo,
-                page,
-                size
-        ));
+        SearchMode searchMode = SearchMode.fromValue(mode);
+        PageResponse<?> result = switch (searchMode) {
+            case EXACT -> searchService.search(
+                    keyword,
+                    scope,
+                    tag,
+                    category,
+                    language,
+                    status,
+                    updatedFrom,
+                    updatedTo,
+                    page,
+                    size
+            );
+            case SEMANTIC -> vectorIndexService.semanticSearch(
+                    keyword,
+                    tag,
+                    category,
+                    language,
+                    status,
+                    updatedFrom,
+                    updatedTo,
+                    page,
+                    size
+            );
+            case HYBRID -> hybridSearchService.search(
+                    keyword,
+                    scope,
+                    tag,
+                    category,
+                    language,
+                    status,
+                    updatedFrom,
+                    updatedTo,
+                    page,
+                    size
+            );
+        };
+        return ApiResponse.success(result);
     }
 
     /**

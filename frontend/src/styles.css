@@ -307,7 +307,16 @@ button {
   display: flex;
   gap: 12px;
   align-items: center;
-  width: min(400px, 38vw);
+  width: min(560px, 46vw);
+}
+
+.search-mode-select {
+  flex: 0 0 118px;
+}
+
+.topbar-search .search-mode-select .ant-select-selector {
+  height: 40px !important;
+  align-items: center;
 }
 
 .topbar-search .ant-input {
@@ -826,6 +835,36 @@ button {
 
 .note-card.list-mode .note-tags {
   margin-bottom: 0;
+}
+
+.search-insight-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+  margin: -6px 0 14px;
+}
+
+.note-card.list-mode .search-insight-row {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.search-insight-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 3px 9px;
+  overflow: hidden;
+  color: #0d4f9f;
+  background: #edf5ff;
+  border: 1px solid #cae0ff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .note-type-pill,
@@ -1876,7 +1915,7 @@ button {
   }
 
   .topbar-search {
-    width: min(420px, 50vw);
+    width: min(560px, 58vw);
   }
 
   .filter-grid.primary,
@@ -1953,10 +1992,16 @@ button {
   }
 
   .topbar-search {
+    flex-wrap: wrap;
     width: 100%;
   }
 
+  .search-mode-select {
+    flex: 1 1 128px;
+  }
+
   .topbar-search .ant-input {
+    flex: 1 1 180px;
     min-width: 0;
   }
 

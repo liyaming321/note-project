@@ -428,3 +428,15 @@
 - 未配置 `local-cli` Embedding 时返回清晰错误；向量索引未创建或为空时返回空分页，不影响普通全文搜索和笔记 CRUD。
 - 新增语义搜索 MockMvc 集成测试，覆盖未配置 Embedding、空索引、正常命中、筛选组合和分页边界；`task.md` 标记任务 7.3 完成。
 - 验证：`mvn test` 通过，包含前端构建、后端编译、17 个 MockMvc 集成测试和 2 个向量索引服务测试，共 19 个测试。
+
+## 2026-05-15 7.1 统一搜索入口与 7.4 混合搜索排序
+
+- 新增 `SearchMode` 枚举，统一解析 `exact`、`semantic`、`hybrid` 三种搜索模式；`GET /api/search` 增加 `mode` 参数并按模式分发到全文搜索、语义搜索或混合搜索。
+- 保留既有 `GET /api/search/semantic` 与 `GET /api/search/hybrid` 兼容入口，避免已有调用路径失效。
+- 混合搜索融合 Lucene BM25 标准化得分与向量相似度，并叠加标题命中、标签命中、置顶、收藏、最近更新等轻量加权规则。
+- 混合搜索结果返回 `keywordScore`、`semanticSimilarity`、`hybridScore` 和 `rankExplanation`，前端可展示命中来源、相关度和“为什么命中”。
+- 前端工作台搜索区新增搜索模式切换：精确全文、语义搜索、混合搜索；URL 查询参数同步 `searchMode`、分页、关键词、范围和筛选条件，刷新后可恢复搜索状态。
+- 搜索结果卡片新增命中来源、全文分、语义分、综合分和排序解释展示；语义搜索在未输入自然语言问题时前端给出明确提示，避免直接触发后端错误。
+- 新增混合搜索 MockMvc 集成测试，覆盖统一入口三种模式分发、混合排序解释、置顶/收藏加权，以及归档、删除、恢复、重建索引后的脏结果一致性验证。
+- `task.md` 标记任务 7.1 和 7.4 完成。
+- 验证：`cd frontend && npm run build` 通过；`mvn -Dtest=HybridSearchApiIntegrationTest test` 通过。Vite 仍提示大 chunk，来源为 Vditor / Ant Design Vue 依赖体积，不影响构建结果。

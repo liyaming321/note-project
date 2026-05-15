@@ -148,7 +148,13 @@ export function uploadImage(file: File) {
 }
 
 export function searchNotes(query: SearchQuery = {}) {
-  return unwrapData<PageResponse<SearchResult>>(httpClient.get('/search', { params: query }))
+  const { searchMode, ...params } = query
+  return unwrapData<PageResponse<SearchResult>>(httpClient.get('/search', {
+    params: {
+      ...params,
+      mode: searchMode
+    }
+  }))
 }
 
 export function fetchCategories() {

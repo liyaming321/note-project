@@ -1,6 +1,7 @@
 export type NoteType = 'MARKDOWN' | 'CODE'
 export type NoteStatus = 'DRAFT' | 'PUBLISHED'
 export type SearchScope = 'all' | 'title' | 'code'
+export type SearchMode = 'exact' | 'semantic' | 'hybrid'
 
 export interface ApiResponse<T> {
   success: boolean
@@ -118,6 +119,7 @@ export interface NoteQuery {
 
 export interface SearchQuery {
   q?: string
+  searchMode?: SearchMode
   scope?: SearchScope
   tag?: string
   category?: string
@@ -132,6 +134,11 @@ export interface SearchQuery {
 export interface SearchResult extends NoteListItem {
   highlight: string
   hitFields: string[]
+  keywordScore?: number
+  semanticSimilarity?: number
+  hybridScore?: number
+  rankExplanation?: string
+  matchReason?: string
 }
 
 export interface MarkdownImportItem {

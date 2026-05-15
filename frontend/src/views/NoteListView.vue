@@ -75,6 +75,15 @@
         <div class="topbar-left">
           <h1>知识库</h1>
           <div class="topbar-search">
+            <a-select
+              v-model:value="searchForm.mode"
+              class="search-mode-select"
+              @change="handleSearchModeChange"
+            >
+              <a-select-option value="exact">精确全文</a-select-option>
+              <a-select-option value="semantic">语义搜索</a-select-option>
+              <a-select-option value="hybrid">混合搜索</a-select-option>
+            </a-select>
             <a-input
               v-model:value="searchForm.keyword"
               placeholder="搜索"
@@ -185,7 +194,11 @@
               </label>
               <label class="filter-control">
                 <span>搜索范围</span>
-                <a-select v-model:value="searchForm.scope" @change="executeSearch">
+                <a-select
+                  v-model:value="searchForm.scope"
+                  :disabled="searchForm.mode === 'semantic'"
+                  @change="executeSearch"
+                >
                   <a-select-option value="all">全部</a-select-option>
                   <a-select-option value="title">标题</a-select-option>
                   <a-select-option value="code">代码</a-select-option>
@@ -359,12 +372,21 @@
                   #{{ tag.name }}
                 </a-tag>
               </div>
+              <div v-if="isSearchMode && resolveSearchInsights(note).length > 0" class="search-insight-row">
+                <span
+                  v-for="insight in resolveSearchInsights(note)"
+                  :key="insight"
+                  class="search-insight-pill"
+                >
+                  {{ insight }}
+                </span>
+              </div>
               <div class="note-card-footer">
                 <span><CalendarOutlined /> {{ formatTime(note.updatedAt) }}</span>
                 <span v-if="note.category" class="meta-line">{{ note.category.name }}</span>
                 <span v-if="note.archived" class="meta-line">已归档</span>
                 <span v-if="note.deleted" class="meta-line danger">已删除</span>
-                <span v-if="note.hitFields?.length" class="meta-line">命中 {{ note.hitFields.join(' / ') }}</span>
+                <span v-if="note.hitFields?.length" class="meta-line">命中 {{ formatHitFields(note.hitFields) }}</span>
                 <div class="note-card-actions">
                   <template v-if="note.deleted">
                     <a-button type="link" size="small" @click.stop="restoreDeletedNote(note)">恢复</a-button>
@@ -549,6 +571,7 @@ import type {
   NoteStatus,
   PageResponse,
   SearchQuery,
+  SearchMode,
   SearchResult,
   SearchScope,
   Tag
@@ -619,12 +642,14 @@ const query = reactive<Required<Pick<NoteQuery, 'page' | 'size' | 'sort' | 'dire
 })
 const searchForm = reactive<{
   keyword: string
+  mode: SearchMode
   scope: SearchScope
   tag?: string
   category?: string
   language?: string
 }>({
   keyword: '',
+  mode: 'exact',
   scope: 'all'
 })
 const sidebarTag = ref<string>()
@@ -684,6 +709,9 @@ const activeFilterSummaries = computed(() => {
   const summaries: string[] = []
   if (searchForm.keyword.trim()) {
     summaries.push(`关键词：${searchForm.keyword.trim()}`)
+  }
+  if (isSearchMode.value) {
+    summaries.push(`模式：${resolveSearchModeLabel(searchForm.mode)}`)
   }
   const categoryName = resolveSelectedCategoryName()
   if (categoryName) {
@@ -757,6 +785,7 @@ async function loadNotes() {
     if (isSearchMode.value) {
       const searchQuery: SearchQuery = {
         q: searchForm.keyword.trim() || undefined,
+        searchMode: searchForm.mode,
         scope: searchForm.scope,
         tag: searchForm.tag || undefined,
         category: searchForm.category || undefined,
@@ -766,6 +795,10 @@ async function loadNotes() {
         updatedTo: query.updatedTo,
         page: query.page,
         size: query.size
+      }
+      if (searchForm.mode === 'semantic' && !searchForm.keyword.trim()) {
+        pageData.value = createEmptyPage(query.page, query.size)
+        return
       }
       pageData.value = (await searchNotes(searchQuery)) as PageResponse<NoteCardItem>
       return
@@ -796,6 +829,14 @@ async function loadTags() {
   tags.value = await fetchTags()
 }
 
+async function handleSearchModeChange(value: SearchMode) {
+  searchForm.mode = value
+  if (value === 'semantic') {
+    searchForm.scope = 'all'
+  }
+  await executeSearch()
+}
+
 function showTagHint() {
   message.info('请选择侧边栏标签云中的标签进行筛选')
 }
@@ -824,12 +865,28 @@ function selectSidebarTag(tagName: string) {
 }
 
 async function executeSearch() {
+  if (searchForm.mode === 'semantic' && !searchForm.keyword.trim()) {
+    message.warning('语义搜索需要输入自然语言问题')
+    return
+  }
   query.page = 0
   await router.replace({
     path: '/',
     query: buildSearchRouteQuery()
   })
   await loadNotes()
+}
+
+function createEmptyPage(page: number, size: number): PageResponse<NoteCardItem> {
+  return {
+    items: [],
+    page,
+    size,
+    totalElements: 0,
+    totalPages: 0,
+    first: page === 0,
+    last: true
+  }
 }
 
 async function clearSearch() {
@@ -899,6 +956,7 @@ async function applyNavFilter(filter: NavFilter) {
 
 function clearSearchState() {
   searchForm.keyword = ''
+  searchForm.mode = 'exact'
   searchForm.scope = 'all'
   searchForm.tag = undefined
   searchForm.category = undefined
@@ -1169,6 +1227,7 @@ function handleDragEnd() {
 
 function searchByTag(tagName: string) {
   searchForm.keyword = ''
+  searchForm.mode = 'exact'
   searchForm.scope = 'all'
   searchForm.tag = tagName
   searchForm.category = undefined
@@ -1181,6 +1240,7 @@ function searchByTag(tagName: string) {
 function syncQueryFromRoute() {
   const routeMode = typeof route.query.mode === 'string' ? route.query.mode : ''
   const routeView = route.query.view
+  const routeSearchMode = route.query.searchMode
   const routeKeyword = route.query.q
   const routeScope = route.query.scope
   const routeTag = route.query.tag
@@ -1189,9 +1249,15 @@ function syncQueryFromRoute() {
   const routeStatus = route.query.status
   const routeUpdatedFrom = route.query.updatedFrom
   const routeUpdatedTo = route.query.updatedTo
+  const routePage = route.query.page
+  const routeSize = route.query.size
+
+  query.page = parseNonNegativeInteger(routePage, 0)
+  query.size = parsePositiveInteger(routeSize, 10)
 
   if (routeMode === 'search') {
     searchForm.keyword = typeof routeKeyword === 'string' ? routeKeyword.trim() : ''
+    searchForm.mode = isSearchModeValue(routeSearchMode) ? routeSearchMode : 'exact'
     searchForm.scope = isSearchScope(routeScope) ? routeScope : 'all'
     searchForm.tag = typeof routeTag === 'string' ? routeTag.trim() : undefined
     searchForm.category = typeof routeCategory === 'string' ? routeCategory.trim() : undefined
@@ -1202,6 +1268,7 @@ function syncQueryFromRoute() {
     query.tag = undefined
   } else {
     searchForm.keyword = ''
+    searchForm.mode = 'exact'
     searchForm.scope = 'all'
     searchForm.tag = undefined
     searchForm.category = undefined
@@ -1236,6 +1303,9 @@ function buildSearchRouteQuery() {
   if (searchForm.keyword.trim()) {
     queryObject.q = searchForm.keyword.trim()
   }
+  if (searchForm.mode !== 'exact') {
+    queryObject.searchMode = searchForm.mode
+  }
   if (searchForm.scope !== 'all') {
     queryObject.scope = searchForm.scope
   }
@@ -1256,6 +1326,12 @@ function buildSearchRouteQuery() {
   }
   if (query.updatedTo) {
     queryObject.updatedTo = query.updatedTo
+  }
+  if (query.page > 0) {
+    queryObject.page = String(query.page)
+  }
+  if (query.size !== 10) {
+    queryObject.size = String(query.size)
   }
   return queryObject
 }
@@ -1282,6 +1358,16 @@ function findCategoryName(items: Category[], categoryId: number): string {
   return ''
 }
 
+function resolveSearchModeLabel(mode: SearchMode) {
+  if (mode === 'semantic') {
+    return '语义搜索'
+  }
+  if (mode === 'hybrid') {
+    return '混合搜索'
+  }
+  return '精确全文'
+}
+
 function resolveSortLabel(sort?: string) {
   if (sort === 'sortOrder') {
     return '自定义排序'
@@ -1295,10 +1381,17 @@ function resolveSortLabel(sort?: string) {
   return '更新时间'
 }
 
-function handlePageChange(page: number, size: number) {
+async function handlePageChange(page: number, size: number) {
   query.page = page - 1
   query.size = size
-  loadNotes()
+  if (isSearchMode.value) {
+    await router.replace({
+      path: '/',
+      query: buildSearchRouteQuery()
+    })
+    return
+  }
+  await loadNotes()
 }
 
 function toTreeData(items: Category[]): CategoryTreeNode[] {
@@ -1323,6 +1416,10 @@ function isSearchScope(value: unknown): value is SearchScope {
   return value === 'all' || value === 'title' || value === 'code'
 }
 
+function isSearchModeValue(value: unknown): value is SearchMode {
+  return value === 'exact' || value === 'semantic' || value === 'hybrid'
+}
+
 function isNoteStatus(value: unknown): value is NoteStatus {
   return value === 'DRAFT' || value === 'PUBLISHED'
 }
@@ -1331,11 +1428,75 @@ function isNavFilter(value: unknown): value is NavFilter {
   return value === 'all' || value === 'recent' || value === 'favorite' || value === 'archived' || value === 'trash'
 }
 
+function parsePositiveInteger(value: unknown, fallback: number) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+  const parsedValue = Number.parseInt(value, 10)
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback
+}
+
+function parseNonNegativeInteger(value: unknown, fallback: number) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+  const parsedValue = Number.parseInt(value, 10)
+  return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : fallback
+}
+
 function renderSnippet(note: NoteCardItem) {
   if (isSearchMode.value && note.highlight) {
     return note.highlight
   }
   return escapeHtml(note.summary || '暂无摘要')
+}
+
+function resolveSearchInsights(note: NoteCardItem) {
+  const insights: string[] = []
+  if (note.hitFields?.length) {
+    insights.push(`来源：${formatHitFields(note.hitFields)}`)
+  }
+  if (typeof note.keywordScore === 'number') {
+    insights.push(`全文 ${formatSearchScore(note.keywordScore)}`)
+  }
+  if (typeof note.semanticSimilarity === 'number') {
+    insights.push(`语义 ${formatSearchScore(note.semanticSimilarity)}`)
+  }
+  if (typeof note.hybridScore === 'number') {
+    insights.push(`综合 ${formatSearchScore(note.hybridScore)}`)
+  }
+  const explanation = note.rankExplanation || note.matchReason
+  if (explanation) {
+    insights.push(explanation)
+  }
+  return insights
+}
+
+function formatHitFields(fields: string[]) {
+  return Array.from(new Set(fields.map(formatHitField))).join(' / ')
+}
+
+function formatHitField(field: string) {
+  if (field === 'title') {
+    return '标题'
+  }
+  if (field === 'code') {
+    return '代码'
+  }
+  if (field === 'category') {
+    return '分类'
+  }
+  if (field === 'semantic') {
+    return '语义'
+  }
+  return '正文'
+}
+
+function formatSearchScore(score: number) {
+  if (!Number.isFinite(score)) {
+    return '0%'
+  }
+  return `${Math.round(score * 100)}%`
 }
 
 function escapeHtml(value: string) {
