@@ -172,6 +172,13 @@ export interface BookmarkImportResult {
 export interface LinkImportPayload {
   url: string
   provider?: string
+  useLlm?: boolean
+}
+
+export interface BatchLinkImportPayload {
+  urls: string[]
+  provider?: string
+  useLlm?: boolean
 }
 
 export interface LinkImportPreview {
@@ -189,6 +196,20 @@ export interface LinkImportPreview {
 
 export interface LinkImportDraft extends LinkImportPreview {
   createdAt: string
+}
+
+export interface BatchLinkImportItem {
+  url: string
+  success: boolean
+  message: string
+  preview?: LinkImportPreview
+}
+
+export interface BatchLinkImportResult {
+  totalCount: number
+  successCount: number
+  failedCount: number
+  items: BatchLinkImportItem[]
 }
 
 export interface ImageUploadResult {

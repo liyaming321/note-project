@@ -548,16 +548,55 @@
       </div>
     </a-modal>
 
+    <a-modal v-model:open="importResultVisible" :title="importResultTitle" width="760px" :footer="null">
+      <div class="import-result-panel">
+        <div class="import-result-heading">
+          <div>
+            <strong>导入汇总</strong>
+            <span>
+              成功 {{ importResultItems.filter(item => item.success).length }} 个，
+              失败 {{ importResultItems.filter(item => !item.success).length }} 个
+            </span>
+          </div>
+        </div>
+        <div class="import-result-list">
+          <article
+            v-for="item in importResultItems"
+            :key="item.id"
+            :class="['import-result-item', item.success ? 'success' : 'failed']"
+          >
+            <div class="import-result-main">
+              <span class="import-result-url">{{ item.source }}</span>
+              <strong>{{ item.title }}</strong>
+              <p>{{ item.message }}</p>
+            </div>
+            <div class="import-result-actions">
+              <a-button
+                v-if="item.noteId"
+                size="small"
+                type="primary"
+                @click="router.push(`/notes/${item.noteId}`)"
+              >
+                查看笔记
+              </a-button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </a-modal>
+
     <a-modal v-model:open="linkImportVisible" title="导入链接" width="680px" :footer="null">
       <div class="link-import-panel">
         <div class="knowledge-qa-intro">
           <strong>从网页生成新笔记草稿</strong>
-          <span>系统会读取网页正文，调用 LLM 生成标题、摘要、标签和分类建议，然后跳转到新建页预览，确认后再保存。</span>
+          <span>支持一次粘贴多个链接。系统会逐条抓取网页正文，生成预览结果；你可以选择保存为草稿，或进入新建页继续编辑。</span>
         </div>
-        <a-input
-          v-model:value="linkImportUrl"
-          placeholder="https://example.com/article"
-          @pressEnter="importCurrentLink"
+        <a-textarea
+          v-model:value="linkImportText"
+          :rows="4"
+          :maxlength="8000"
+          show-count
+          placeholder="每行一个链接，也支持用空格、逗号分隔多个 URL"
         />
         <div class="knowledge-qa-actions">
           <a-select v-model:value="linkImportProvider" class="llm-provider-select">
@@ -570,11 +609,69 @@
               {{ provider.configured ? '' : '（未配置）' }}
             </a-select-option>
           </a-select>
+          <a-checkbox v-model:checked="linkImportUseLlm">使用 LLM 整理标题、摘要和标签</a-checkbox>
           <a-button type="primary" :loading="linkImporting" @click="importCurrentLink">
-            抓取并生成预览
+            批量抓取并生成预览
           </a-button>
         </div>
-        <p class="settings-note">导入链接会把网页正文片段发送给所选 LLM 供应商，请避免处理敏感网页。</p>
+        <p class="settings-note">
+          使用 LLM 整理时会把网页正文片段发送给所选供应商；关闭后只在本机抓取正文并生成基础草稿，请避免处理敏感网页。
+        </p>
+        <section v-if="linkImportResults.length > 0" class="import-result-panel">
+          <div class="import-result-heading">
+            <div>
+              <strong>导入结果</strong>
+              <span>成功 {{ linkImportSummary.success }} 条，失败 {{ linkImportSummary.failed }} 条</span>
+            </div>
+            <a-button
+              size="small"
+              :loading="savingLinkDrafts"
+              :disabled="successfulLinkResults.length === 0"
+              @click="saveAllLinkDrafts"
+            >
+              全部保存为草稿
+            </a-button>
+          </div>
+          <div class="import-result-list">
+            <article
+              v-for="item in linkImportResults"
+              :key="item.id"
+              :class="['import-result-item', item.status]"
+            >
+              <div class="import-result-main">
+                <span class="import-result-url">{{ item.url }}</span>
+                <strong>{{ item.preview?.title || item.message }}</strong>
+                <small v-if="item.preview">
+                  {{ item.preview.provider === 'crawler' ? '仅抓取正文' : providerLabel(item.preview.provider) }}
+                  / {{ item.preview.model }}
+                </small>
+                <p v-if="item.preview">{{ item.preview.summary }}</p>
+                <p v-else>{{ item.message }}</p>
+              </div>
+              <div class="import-result-actions">
+                <a-button
+                  v-if="item.status === 'failed'"
+                  size="small"
+                  :loading="item.retrying"
+                  @click="retryLinkImportItem(item)"
+                >
+                  重试
+                </a-button>
+                <a-button
+                  v-if="item.preview"
+                  size="small"
+                  :disabled="item.saved"
+                  @click="saveLinkPreviewAsDraft(item)"
+                >
+                  {{ item.saved ? '已保存草稿' : '保存为草稿' }}
+                </a-button>
+                <a-button v-if="item.preview" size="small" type="primary" @click="openLinkPreviewInEditor(item)">
+                  进入新建页
+                </a-button>
+              </div>
+            </article>
+          </div>
+        </section>
       </div>
     </a-modal>
 
@@ -695,6 +792,7 @@ import {
   changePinned,
   changeStatus,
   createCategory,
+  createNote,
   deleteCategory,
   exportBackup,
   exportNotesZip,
@@ -704,6 +802,7 @@ import {
   fetchTags,
   importBookmarks,
   importLink,
+  importLinks,
   importMarkdown,
   permanentlyDeleteNote,
   reorderNotes,
@@ -711,9 +810,11 @@ import {
   updateCategory
 } from '@/api/knowledgeBase'
 import type {
+  BatchLinkImportItem,
   Category,
   KnowledgeQaResult,
   LinkImportDraft,
+  LinkImportPreview,
   LlmProviderInfo,
   NoteListItem,
   NoteQuery,
@@ -768,6 +869,23 @@ type KnowledgeQaThreadItem = {
   result?: KnowledgeQaResult
   error?: string
 }
+type LinkImportResultItem = {
+  id: string
+  url: string
+  status: 'success' | 'failed'
+  message: string
+  preview?: LinkImportPreview
+  saved: boolean
+  retrying: boolean
+}
+type ImportResultItem = {
+  id: string
+  title: string
+  source: string
+  success: boolean
+  message: string
+  noteId?: number
+}
 
 const SEARCH_HISTORY_STORAGE_KEY = 'people-wiki-search-history'
 const LINK_IMPORT_DRAFT_PREFIX = 'people-wiki-link-import-draft:'
@@ -790,10 +908,16 @@ const customUpdatedTo = ref<string>()
 const advancedFiltersOpen = ref(false)
 const categoryManagerVisible = ref(false)
 const helpVisible = ref(false)
+const importResultVisible = ref(false)
+const importResultTitle = ref('导入结果')
+const importResultItems = ref<ImportResultItem[]>([])
 const linkImportVisible = ref(false)
 const linkImporting = ref(false)
-const linkImportUrl = ref('')
+const savingLinkDrafts = ref(false)
+const linkImportText = ref('')
 const linkImportProvider = ref<'bailian' | 'deepseek'>('bailian')
+const linkImportUseLlm = ref(true)
+const linkImportResults = ref<LinkImportResultItem[]>([])
 const qaVisible = ref(false)
 const qaLoading = ref(false)
 const qaQuestion = ref('')
@@ -951,6 +1075,11 @@ const topKeywords = computed(() => {
   return Array.from(new Set(noteTagNames)).slice(0, 3).concat(noteTagNames.length === 0 ? ['全部'] : [])
 })
 const favoriteSearches = computed(() => searchHistory.value.filter(item => item.favorite).slice(0, 5))
+const linkImportSummary = computed(() => ({
+  success: linkImportResults.value.filter(item => item.status === 'success').length,
+  failed: linkImportResults.value.filter(item => item.status === 'failed').length
+}))
+const successfulLinkResults = computed(() => linkImportResults.value.filter(item => item.preview && !item.saved))
 
 onMounted(async () => {
   loadSearchHistory()
@@ -1345,32 +1474,145 @@ function openLinkImport() {
 }
 
 async function importCurrentLink() {
-  const url = linkImportUrl.value.trim()
-  if (!url) {
+  const urls = parseLinkImportUrls(linkImportText.value)
+  if (urls.length === 0) {
     message.warning('请输入要导入的网页链接')
     return
   }
   linkImporting.value = true
   try {
-    const preview = await importLink({
-      url,
-      provider: linkImportProvider.value
+    const result = await importLinks({
+      urls,
+      provider: linkImportProvider.value,
+      useLlm: linkImportUseLlm.value
     })
-    const draftId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    const draft: LinkImportDraft = {
-      ...preview,
-      createdAt: new Date().toISOString()
-    }
-    window.localStorage.setItem(`${LINK_IMPORT_DRAFT_PREFIX}${draftId}`, JSON.stringify(draft))
-    linkImportVisible.value = false
-    linkImportUrl.value = ''
-    message.success('链接已整理，正在进入新建笔记预览')
-    await router.push({ path: '/notes/new', query: { draftId } })
+    linkImportResults.value = result.items.map(item => toLinkImportResultItem(
+      item.url,
+      item.success,
+      item.message,
+      item.preview
+    ))
+    const failedText = linkImportSummary.value.failed > 0 ? `，失败 ${linkImportSummary.value.failed} 条` : ''
+    message.success(`链接预览完成 ${linkImportSummary.value.success} 条${failedText}`)
   } catch (error) {
     message.error((error as Error).message)
   } finally {
     linkImporting.value = false
   }
+}
+
+async function retryLinkImportItem(item: LinkImportResultItem) {
+  item.retrying = true
+  try {
+    const preview = await importLink({
+      url: item.url,
+      provider: linkImportProvider.value,
+      useLlm: linkImportUseLlm.value
+    })
+    Object.assign(item, toLinkImportResultItem(item.url, true, '链接解析完成', preview))
+    message.success('链接已重新生成预览')
+  } catch (error) {
+    item.status = 'failed'
+    item.message = (error as Error).message
+    item.preview = undefined
+    message.error((error as Error).message)
+  } finally {
+    item.retrying = false
+  }
+}
+
+async function saveAllLinkDrafts() {
+  const items = successfulLinkResults.value
+  if (items.length === 0) {
+    message.warning('没有可保存的链接预览')
+    return
+  }
+  savingLinkDrafts.value = true
+  try {
+    for (const item of items) {
+      await saveLinkPreviewAsDraft(item, false)
+    }
+    await Promise.all([loadCategories(), loadTags(), loadNotes()])
+    message.success(`已保存 ${items.length} 条链接草稿`)
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    savingLinkDrafts.value = false
+  }
+}
+
+async function saveLinkPreviewAsDraft(item: LinkImportResultItem, refresh = true) {
+  if (!item.preview) {
+    return
+  }
+  const preview = item.preview
+  const createdNote = await createNote({
+    title: preview.title,
+    content: preview.content,
+    summary: preview.summary,
+    type: 'MARKDOWN',
+    status: 'DRAFT',
+    language: 'markdown',
+    categoryId: preview.categoryId,
+    tags: preview.tags,
+    favorite: false,
+    pinned: false
+  })
+  item.saved = true
+  item.message = `已保存为草稿：${createdNote.title}`
+  if (refresh) {
+    await Promise.all([loadCategories(), loadTags(), loadNotes()])
+    message.success('已保存为草稿')
+  }
+}
+
+async function openLinkPreviewInEditor(item: LinkImportResultItem) {
+  if (!item.preview) {
+    return
+  }
+  const draftId = saveLinkPreviewToLocalDraft(item.preview)
+  linkImportVisible.value = false
+  message.success('链接已整理，正在进入新建笔记预览')
+  await router.push({ path: '/notes/new', query: { draftId } })
+}
+
+function parseLinkImportUrls(value: string) {
+  return Array.from(new Set(value
+    .split(/[\s,，]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+  )).slice(0, 20)
+}
+
+function toLinkImportResultItem(
+  url: string,
+  success: boolean,
+  messageText: string,
+  preview?: LinkImportPreview
+): LinkImportResultItem {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    url,
+    status: success ? 'success' : 'failed',
+    message: messageText,
+    preview,
+    saved: false,
+    retrying: false
+  }
+}
+
+function saveLinkPreviewToLocalDraft(preview: LinkImportPreview) {
+  const draftId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const draft: LinkImportDraft = {
+    ...preview,
+    createdAt: new Date().toISOString()
+  }
+  window.localStorage.setItem(`${LINK_IMPORT_DRAFT_PREFIX}${draftId}`, JSON.stringify(draft))
+  return draftId
+}
+
+function providerLabel(provider: string) {
+  return provider === 'deepseek' ? 'DeepSeek' : provider === 'bailian' ? '阿里百炼' : '网页抓取'
 }
 
 async function handleImportFiles(event: Event) {
@@ -1384,6 +1626,17 @@ async function handleImportFiles(event: Event) {
   try {
     const result = await importMarkdown(files)
     await Promise.all([loadCategories(), loadTags(), loadNotes()])
+    showImportResult(
+      'Markdown 导入结果',
+      result.items.map(item => ({
+        id: `${item.fileName}-${Math.random().toString(16).slice(2)}`,
+        title: item.title || item.fileName,
+        source: item.fileName,
+        success: item.success,
+        message: item.message,
+        noteId: item.noteId
+      }))
+    )
     const failedText = result.failedCount > 0 ? `，失败 ${result.failedCount} 个` : ''
     message.success(`导入成功 ${result.importedCount} 个${failedText}`)
   } catch (error) {
@@ -1420,6 +1673,17 @@ async function handleBookmarkImportFile(event: Event) {
   try {
     const result = await importBookmarks(file)
     await Promise.all([loadCategories(), loadTags(), loadNotes()])
+    showImportResult(
+      '书签导入结果',
+      result.items.map(item => ({
+        id: `${item.url}-${Math.random().toString(16).slice(2)}`,
+        title: item.title,
+        source: item.url,
+        success: item.success,
+        message: item.message,
+        noteId: item.noteId
+      }))
+    )
     const failedText = result.failedCount > 0 ? `，失败 ${result.failedCount} 个` : ''
     message.success(`书签导入成功 ${result.importedCount} 个${failedText}`)
   } catch (error) {
@@ -1427,6 +1691,12 @@ async function handleBookmarkImportFile(event: Event) {
   } finally {
     loading.value = false
   }
+}
+
+function showImportResult(title: string, items: ImportResultItem[]) {
+  importResultTitle.value = title
+  importResultItems.value = items
+  importResultVisible.value = true
 }
 
 async function backupWorkspace() {

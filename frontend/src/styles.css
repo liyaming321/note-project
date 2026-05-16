@@ -2086,6 +2086,117 @@ button {
   gap: 14px;
 }
 
+.import-result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-result-heading,
+.import-result-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #d8e4f5;
+  border-radius: var(--radius-md);
+}
+
+.import-result-heading {
+  align-items: center;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%);
+}
+
+.import-result-heading strong,
+.import-result-heading span {
+  display: block;
+}
+
+.import-result-heading strong {
+  color: var(--text-main);
+  font-size: 15px;
+}
+
+.import-result-heading span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.import-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.import-result-item {
+  position: relative;
+  overflow: hidden;
+}
+
+.import-result-item::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  content: "";
+  background: #22c55e;
+}
+
+.import-result-item.failed::before {
+  background: #f97316;
+}
+
+.import-result-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.import-result-url {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-result-main strong {
+  color: var(--text-main);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.import-result-main small {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.import-result-main p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.import-result-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .knowledge-qa-intro,
 .knowledge-qa-form,
 .knowledge-qa-answer {
@@ -2678,6 +2789,15 @@ button {
   .settings-action-card {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .import-result-heading,
+  .import-result-item {
+    flex-direction: column;
+  }
+
+  .import-result-actions {
+    justify-content: flex-start;
   }
 
   .llm-summary-panel,

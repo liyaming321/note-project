@@ -116,6 +116,52 @@ class LinkImportApiIntegrationTest {
     }
 
     /**
+     * 验证批量链接导入会返回逐条成功与失败结果。
+     *
+     * @throws Exception 请求执行异常
+     */
+    @Test
+    void shouldPreviewBatchLinkImportWithItemFailures() throws Exception {
+        mockMvc.perform(post("/api/import/links")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "urls", java.util.List.of(TEST_SERVER.pageUrl(), "file:///tmp/local.md"),
+                                "provider", "deepseek"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalCount").value(2))
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.items[0].success").value(true))
+                .andExpect(jsonPath("$.data.items[0].preview.title").value("AI整理的链接笔记"))
+                .andExpect(jsonPath("$.data.items[1].success").value(false))
+                .andExpect(jsonPath("$.data.items[1].message").value(Matchers.containsString("http")));
+    }
+
+    /**
+     * 验证关闭 LLM 后仍可生成纯网页抓取预览。
+     *
+     * @throws Exception 请求执行异常
+     */
+    @Test
+    void shouldPreviewLinkImportWithoutLlm() throws Exception {
+        mockMvc.perform(post("/api/import/link")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "url", TEST_SERVER.pageUrl(),
+                                "provider", "deepseek",
+                                "useLlm", false
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("crawler"))
+                .andExpect(jsonPath("$.data.model").value("jsoup"))
+                .andExpect(jsonPath("$.data.title").value("原始网页标题"))
+                .andExpect(jsonPath("$.data.summary").value(Matchers.containsString("网页正文第一段")))
+                .andExpect(jsonPath("$.data.tags", Matchers.hasItems("链接导入", "网页摘录")))
+                .andExpect(jsonPath("$.data.content").value(Matchers.containsString("网页正文摘录")));
+    }
+
+    /**
      * 转换 JSON。
      *
      * @param value 原始对象

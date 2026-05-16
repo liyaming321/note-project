@@ -1,6 +1,8 @@
 package com.knowledgebase.controller;
 
 import com.knowledgebase.dto.ApiResponse;
+import com.knowledgebase.dto.BatchLinkImportResponse;
+import com.knowledgebase.dto.BatchLinkImportRequest;
 import com.knowledgebase.dto.BookmarkImportResponse;
 import com.knowledgebase.dto.ExportZipRequest;
 import com.knowledgebase.dto.LinkImportPreviewResponse;
@@ -80,6 +82,17 @@ public class ImportExportController {
     @PostMapping("/api/import/link")
     public ApiResponse<LinkImportPreviewResponse> importLink(@Valid @RequestBody LinkImportRequest request) {
         return ApiResponse.success("链接解析完成", linkImportService.preview(request));
+    }
+
+    /**
+     * 批量根据链接抓取网页并生成新建笔记预览。
+     *
+     * @param request 批量链接导入请求
+     * @return 批量新建笔记预览
+     */
+    @PostMapping("/api/import/links")
+    public ApiResponse<BatchLinkImportResponse> importLinks(@Valid @RequestBody BatchLinkImportRequest request) {
+        return ApiResponse.success("批量链接解析完成", linkImportService.previewBatch(request));
     }
 
     /**

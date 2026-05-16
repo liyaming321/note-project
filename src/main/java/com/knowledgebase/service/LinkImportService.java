@@ -1,5 +1,8 @@
 package com.knowledgebase.service;
 
+import com.knowledgebase.dto.BatchLinkImportItemResponse;
+import com.knowledgebase.dto.BatchLinkImportRequest;
+import com.knowledgebase.dto.BatchLinkImportResponse;
 import com.knowledgebase.dto.LinkImportPreviewResponse;
 import com.knowledgebase.dto.LinkImportRequest;
 import com.knowledgebase.dto.LlmSummaryRequest;
@@ -9,6 +12,8 @@ import com.knowledgebase.exception.BusinessException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -26,6 +31,8 @@ public class LinkImportService {
     private static final int MAX_BODY_SIZE_BYTES = 3 * 1024 * 1024;
     private static final int MAX_EXTRACTED_TEXT_LENGTH = 12_000;
     private static final int MAX_PREVIEW_TEXT_LENGTH = 8_000;
+    private static final String CRAWL_ONLY_PROVIDER = "crawler";
+    private static final String CRAWL_ONLY_MODEL = "jsoup";
 
     private final LlmSummaryService llmSummaryService;
 
@@ -47,14 +54,16 @@ public class LinkImportService {
     public LinkImportPreviewResponse preview(LinkImportRequest request) {
         URI sourceUri = validateHttpUrl(request.url());
         ExtractedWebPage webPage = fetchWebPage(sourceUri);
-        LlmSummaryResponse suggestion = llmSummaryService.summarize(new LlmSummaryRequest(
-                request.provider(),
-                webPage.title(),
-                webPage.text(),
-                NoteType.MARKDOWN,
-                "markdown",
-                null
-        ));
+        LlmSummaryResponse suggestion = useLlm(request)
+                ? llmSummaryService.summarize(new LlmSummaryRequest(
+                        request.provider(),
+                        webPage.title(),
+                        webPage.text(),
+                        NoteType.MARKDOWN,
+                        "markdown",
+                        null
+                ))
+                : buildCrawlOnlySuggestion(sourceUri, webPage);
         String title = firstNotBlank(suggestion.title(), webPage.title(), sourceUri.getHost());
         return new LinkImportPreviewResponse(
                 sourceUri.toString(),
@@ -67,6 +76,36 @@ public class LinkImportService {
                 suggestion.categoryName(),
                 suggestion.categoryId(),
                 buildPreviewContent(sourceUri, webPage, title, suggestion)
+        );
+    }
+
+    /**
+     * 批量抓取网页并生成新建笔记预览。
+     *
+     * @param request 批量链接导入请求
+     * @return 批量导入预览结果
+     */
+    public BatchLinkImportResponse previewBatch(BatchLinkImportRequest request) {
+        List<BatchLinkImportItemResponse> items = new ArrayList<>();
+        for (String url : request.urls()) {
+            String safeUrl = safeText(url);
+            try {
+                LinkImportPreviewResponse preview = preview(new LinkImportRequest(
+                        safeUrl,
+                        request.provider(),
+                        request.useLlm()
+                ));
+                items.add(new BatchLinkImportItemResponse(safeUrl, true, "链接解析完成", preview));
+            } catch (BusinessException ex) {
+                items.add(new BatchLinkImportItemResponse(safeUrl, false, ex.getMessage(), null));
+            }
+        }
+        int successCount = (int) items.stream().filter(BatchLinkImportItemResponse::success).count();
+        return new BatchLinkImportResponse(
+                items.size(),
+                successCount,
+                items.size() - successCount,
+                items
         );
     }
 
@@ -156,6 +195,37 @@ public class LinkImportService {
         builder.append("## 摘要\n\n").append(suggestion.summary()).append("\n\n");
         builder.append("## 网页正文摘录\n\n").append(limitText(webPage.text(), MAX_PREVIEW_TEXT_LENGTH)).append("\n");
         return builder.toString();
+    }
+
+    /**
+     * 是否使用 LLM 整理网页。
+     *
+     * @param request 链接导入请求
+     * @return 是否使用 LLM
+     */
+    private boolean useLlm(LinkImportRequest request) {
+        return request.useLlm() == null || request.useLlm();
+    }
+
+    /**
+     * 构建纯抓取导入建议。
+     *
+     * @param uri 原始链接
+     * @param webPage 网页内容
+     * @return 基础建议
+     */
+    private LlmSummaryResponse buildCrawlOnlySuggestion(URI uri, ExtractedWebPage webPage) {
+        String title = firstNotBlank(webPage.title(), uri.getHost(), "链接导入笔记");
+        String summary = limitText(webPage.text(), 260);
+        return new LlmSummaryResponse(
+                CRAWL_ONLY_PROVIDER,
+                CRAWL_ONLY_MODEL,
+                title,
+                summary,
+                List.of("链接导入", "网页摘录"),
+                "",
+                null
+        );
     }
 
     /**

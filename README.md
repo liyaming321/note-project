@@ -202,32 +202,49 @@ GET /api/notes/{id}/similar?limit=6
 
 ## 链接导入
 
-工作台首页“更多”菜单提供“导入链接”入口。输入网页 URL 并选择 LLM 供应商后，后端会抓取网页正文，移除导航、脚本、样式、页脚等噪声内容，再调用 LLM 生成标题、摘要、标签和分类建议。
+工作台首页“更多”菜单提供“导入链接”入口。输入一个或多个网页 URL 并选择 LLM 供应商后，后端会抓取网页正文，移除导航、脚本、样式、页脚等噪声内容，再按配置调用 LLM 生成标题、摘要、标签和分类建议。
 
-链接导入不会直接写入数据库。解析成功后，前端会把预览结果临时保存到浏览器 `localStorage`，并跳转到新建笔记页；用户可以在编辑器中继续检查、调整和补充内容，确认后再手动保存为正式笔记。
+链接导入支持逐条预览、失败重试、保存为草稿和进入新建页继续编辑。默认不会直接写入数据库；只有用户点击“保存为草稿”时才会调用笔记创建接口。点击“进入新建页”时，前端会把预览结果临时保存到浏览器 `localStorage`，并跳转到新建笔记页让用户继续检查和调整。
 
 链接导入 API：
 
 ```text
 POST /api/import/link
+POST /api/import/links
 ```
 
-请求示例：
+单链接请求示例：
 
 ```json
 {
   "url": "https://example.com/article",
-  "provider": "deepseek"
+  "provider": "deepseek",
+  "useLlm": true
 }
 ```
 
-响应会返回 `sourceUrl`、`sourceTitle`、`provider`、`model`、`title`、`summary`、`tags`、`categoryName`、`categoryId` 和 `content`。其中 `content` 是可直接放入新建笔记页的 Markdown 预览正文，包含来源链接、原始标题、整理模型、摘要和网页正文摘录。
+批量链接请求示例：
+
+```json
+{
+  "urls": [
+    "https://example.com/article-a",
+    "https://example.com/article-b"
+  ],
+  "provider": "deepseek",
+  "useLlm": true
+}
+```
+
+响应会返回 `sourceUrl`、`sourceTitle`、`provider`、`model`、`title`、`summary`、`tags`、`categoryName`、`categoryId` 和 `content`。其中 `content` 是可直接放入新建笔记页的 Markdown 预览正文，包含来源链接、原始标题、整理模型、摘要和网页正文摘录。批量接口会额外返回每条链接的 `success`、`message` 和 `preview`，便于前端展示成功、失败和重试入口。
+
+如果关闭 `useLlm`，系统会只抓取网页正文并生成基础 Markdown 草稿，`provider` 会显示为 `crawler`，不会把网页正文发送给外部 LLM 供应商。
 
 ### 隐私说明
 
 默认笔记、附件、数据库、Lucene 全文索引和向量索引都存储在本机目录。精确全文搜索、标签分类筛选和未配置 LLM / Embedding 时的普通笔记操作不会把内容发送到外部服务。
 
-启用本地 `llama-embedding` 时，向量生成在本机命令行执行；启用阿里百炼或 DeepSeek 后，LLM 总结、知识库问答和链接导入会把当前笔记内容、检索到的引用片段或网页正文摘录发送给对应供应商。请避免在未确认供应商数据策略前处理敏感信息。
+启用本地 `llama-embedding` 时，向量生成在本机命令行执行；启用阿里百炼或 DeepSeek 后，LLM 总结、知识库问答和开启 LLM 整理的链接导入会把当前笔记内容、检索到的引用片段或网页正文摘录发送给对应供应商。关闭链接导入的 `useLlm` 后，仅进行本机网页抓取和正文预览。请避免在未确认供应商数据策略前处理敏感信息。
 
 ## 本地开发
 
@@ -387,3 +404,5 @@ java -jar target/people-wiki-0.0.1-SNAPSHOT.jar
 第一至第六阶段核心能力已完成，包括基础 CRUD、全文搜索、版本历史、导入导出、备份恢复、草稿发布、归档回收站、设置维护和帮助面板。
 
 第七阶段已完成统一搜索入口、Embedding 向量化基础能力、语义搜索 API、混合搜索排序、RAG 知识库问答、相似笔记推荐、搜索体验与索引运维完善，以及链接导入预览能力。
+
+第八阶段正在推进体验、稳定性与性能优化，已完成编辑器深度体验优化和导入链路批量化增强。

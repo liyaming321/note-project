@@ -7,6 +7,8 @@ import type {
   AdminVectorIndexInfo,
   AdminVectorReindexResult,
   AdminWorkspaceInfo,
+  BatchLinkImportPayload,
+  BatchLinkImportResult,
   BookmarkImportResult,
   Category,
   LlmProviderInfo,
@@ -128,6 +130,12 @@ export function importBookmarks(file: File) {
 export function importLink(payload: LinkImportPayload) {
   return unwrapData<LinkImportPreview>(httpClient.post('/import/link', payload, {
     timeout: 120000
+  }))
+}
+
+export function importLinks(payload: BatchLinkImportPayload) {
+  return unwrapData<BatchLinkImportResult>(httpClient.post('/import/links', payload, {
+    timeout: 300000
   }))
 }
 
