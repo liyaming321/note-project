@@ -169,6 +169,28 @@ export interface BookmarkImportResult {
   items: BookmarkImportItem[]
 }
 
+export interface LinkImportPayload {
+  url: string
+  provider?: string
+}
+
+export interface LinkImportPreview {
+  sourceUrl: string
+  sourceTitle: string
+  provider: string
+  model: string
+  title: string
+  summary: string
+  tags: string[]
+  categoryName?: string
+  categoryId?: number
+  content: string
+}
+
+export interface LinkImportDraft extends LinkImportPreview {
+  createdAt: string
+}
+
 export interface ImageUploadResult {
   fileName: string
   url: string
@@ -218,6 +240,21 @@ export interface AdminVectorReindexResult {
   dimension: number
 }
 
+export interface AdminIndexHealth {
+  databaseActiveCount: number
+  searchIndexedCount: number
+  vectorIndexedCount: number
+  searchHealthy: boolean
+  vectorHealthy: boolean
+  message: string
+}
+
+export interface AdminVectorCleanupResult {
+  removedCount: number
+  indexedCount: number
+  message: string
+}
+
 export interface LlmProviderInfo {
   name: 'bailian' | 'deepseek'
   model: string
@@ -241,4 +278,47 @@ export interface LlmSummaryResult {
   tags: string[]
   categoryName?: string
   categoryId?: number
+}
+
+export interface KnowledgeQaPayload {
+  question: string
+  provider?: string
+  topK?: number
+  tag?: string
+  category?: string
+  language?: string
+  status?: NoteStatus
+  updatedFrom?: string
+  updatedTo?: string
+}
+
+export interface KnowledgeQaCitation {
+  noteId: number
+  title: string
+  snippet: string
+  url: string
+}
+
+export interface KnowledgeQaResult {
+  answer: string
+  provider: string
+  model: string
+  citations: KnowledgeQaCitation[]
+}
+
+export interface SimilarNote {
+  id: number
+  title: string
+  summary: string
+  similarityScore: number
+  reason: string
+  source: string
+  type: NoteType
+  status: NoteStatus
+  language?: string
+  category?: SimpleCategory
+  tags: Tag[]
+  pinned: boolean
+  favorite: boolean
+  updatedAt: string
 }

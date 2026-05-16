@@ -4,26 +4,17 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.knowledgebase.config.KnowledgeBaseProperties;
-import com.knowledgebase.config.KnowledgeBaseProperties.ProviderProperties;
 import com.knowledgebase.dto.LlmProviderResponse;
 import com.knowledgebase.dto.LlmSummaryRequest;
 import com.knowledgebase.dto.LlmSummaryResponse;
 import com.knowledgebase.entity.Category;
-import com.knowledgebase.entity.LlmProvider;
 import com.knowledgebase.exception.BusinessException;
 import com.knowledgebase.repository.CategoryRepository;
 import com.knowledgebase.util.MarkdownTextExtractor;
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -43,7 +34,7 @@ public class LlmSummaryService {
     private final KnowledgeBaseProperties properties;
     private final CategoryRepository categoryRepository;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final LlmChatService llmChatService;
 
     /**
      * 创建 LLM 笔记总结服务。
@@ -51,18 +42,18 @@ public class LlmSummaryService {
      * @param properties 知识库配置
      * @param categoryRepository 分类仓库
      * @param objectMapper JSON 工具
+     * @param llmChatService LLM 对话服务
      */
     public LlmSummaryService(
             KnowledgeBaseProperties properties,
             CategoryRepository categoryRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            LlmChatService llmChatService
     ) {
         this.properties = properties;
         this.categoryRepository = categoryRepository;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(timeoutSeconds()))
-                .build();
+        this.llmChatService = llmChatService;
     }
 
     /**
@@ -71,10 +62,7 @@ public class LlmSummaryService {
      * @return 供应商列表
      */
     public List<LlmProviderResponse> providers() {
-        return List.of(
-                toProviderResponse(LlmProvider.BAILIAN, providerProperties(LlmProvider.BAILIAN)),
-                toProviderResponse(LlmProvider.DEEPSEEK, providerProperties(LlmProvider.DEEPSEEK))
-        );
+        return llmChatService.providers();
     }
 
     /**
@@ -84,66 +72,23 @@ public class LlmSummaryService {
      * @return 总结结果
      */
     public LlmSummaryResponse summarize(LlmSummaryRequest request) {
-        LlmProvider provider = resolveProvider(request.provider());
-        ProviderProperties providerProperties = providerProperties(provider);
-        validateProvider(provider, providerProperties);
-        try {
-            String responseContent = callChatCompletions(providerProperties, buildPrompt(request));
-            LlmSuggestion suggestion = parseSuggestion(responseContent);
-            Category matchedCategory = matchCategory(suggestion.categoryName());
-            return new LlmSummaryResponse(
-                    provider.name().toLowerCase(Locale.ROOT),
-                    providerProperties.getModel(),
-                    suggestion.title(),
-                    suggestion.summary(),
-                    suggestion.tags(),
-                    suggestion.categoryName(),
-                    matchedCategory == null ? null : matchedCategory.getId()
-            );
-        } catch (IOException ex) {
-            throw new BusinessException("LLM 总结请求失败：" + ex.getMessage());
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new BusinessException("LLM 总结请求被中断");
-        }
-    }
-
-    /**
-     * 调用 OpenAI 兼容 Chat Completions 接口。
-     *
-     * @param providerProperties 供应商配置
-     * @param prompt 提示词
-     * @return 模型响应内容
-     * @throws IOException 网络异常
-     * @throws InterruptedException 中断异常
-     */
-    private String callChatCompletions(ProviderProperties providerProperties, String prompt)
-            throws IOException, InterruptedException {
-        Map<String, Object> requestBody = Map.of(
-                "model", providerProperties.getModel(),
-                "temperature", TEMPERATURE,
-                "messages", List.of(
-                        Map.of("role", "system", "content", "你是个人知识库的信息整理助手，只输出合法 JSON。"),
-                        Map.of("role", "user", "content", prompt)
-                )
+        LlmChatService.LlmChatResult chatResult = llmChatService.chat(
+                request.provider(),
+                "你是个人知识库的信息整理助手，只输出合法 JSON。",
+                buildPrompt(request),
+                TEMPERATURE
         );
-        HttpRequest httpRequest = HttpRequest.newBuilder()
-                .uri(chatCompletionsUri(providerProperties))
-                .timeout(Duration.ofSeconds(timeoutSeconds()))
-                .header("Authorization", "Bearer " + providerProperties.getApiKey().trim())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
-                .build();
-        HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new BusinessException("LLM 总结失败，HTTP " + response.statusCode() + "：" + response.body());
-        }
-        JsonNode rootNode = objectMapper.readTree(response.body());
-        JsonNode contentNode = rootNode.path("choices").path(0).path("message").path("content");
-        if (contentNode.isMissingNode() || contentNode.asText().isBlank()) {
-            throw new BusinessException("LLM 总结失败：模型响应为空");
-        }
-        return contentNode.asText();
+        LlmSuggestion suggestion = parseSuggestion(chatResult.content());
+        Category matchedCategory = matchCategory(suggestion.categoryName());
+        return new LlmSummaryResponse(
+                chatResult.provider(),
+                chatResult.model(),
+                suggestion.title(),
+                suggestion.summary(),
+                suggestion.tags(),
+                suggestion.categoryName(),
+                matchedCategory == null ? null : matchedCategory.getId()
+        );
     }
 
     /**
@@ -254,84 +199,6 @@ public class LlmSummaryService {
     }
 
     /**
-     * 解析供应商。
-     *
-     * @param providerValue 供应商文本
-     * @return 供应商
-     */
-    private LlmProvider resolveProvider(String providerValue) {
-        if (providerValue == null || providerValue.isBlank()) {
-            return LlmProvider.fromValue(properties.getLlm().getDefaultProvider());
-        }
-        try {
-            return LlmProvider.fromValue(providerValue);
-        } catch (IllegalArgumentException ex) {
-            throw new BusinessException(ex.getMessage());
-        }
-    }
-
-    /**
-     * 获取供应商配置。
-     *
-     * @param provider 供应商
-     * @return 供应商配置
-     */
-    private ProviderProperties providerProperties(LlmProvider provider) {
-        return switch (provider) {
-            case BAILIAN -> properties.getLlm().getBailian();
-            case DEEPSEEK -> properties.getLlm().getDeepseek();
-        };
-    }
-
-    /**
-     * 校验供应商配置。
-     *
-     * @param provider 供应商
-     * @param providerProperties 供应商配置
-     */
-    private void validateProvider(LlmProvider provider, ProviderProperties providerProperties) {
-        if (providerProperties == null || safeText(providerProperties.getApiKey()).isBlank()) {
-            throw new BusinessException("请先配置 " + provider.name().toLowerCase(Locale.ROOT) + " 的 API Key");
-        }
-        if (safeText(providerProperties.getBaseUrl()).isBlank()) {
-            throw new BusinessException("请先配置 LLM API 地址");
-        }
-        if (safeText(providerProperties.getModel()).isBlank()) {
-            throw new BusinessException("请先配置 LLM 模型名称");
-        }
-    }
-
-    /**
-     * 转换供应商配置响应。
-     *
-     * @param provider 供应商
-     * @param providerProperties 供应商配置
-     * @return 供应商配置响应
-     */
-    private LlmProviderResponse toProviderResponse(LlmProvider provider, ProviderProperties providerProperties) {
-        return new LlmProviderResponse(
-                provider.name().toLowerCase(Locale.ROOT),
-                providerProperties == null ? "" : safeText(providerProperties.getModel()),
-                providerProperties != null && !safeText(providerProperties.getApiKey()).isBlank()
-        );
-    }
-
-    /**
-     * 构建 Chat Completions 地址。
-     *
-     * @param providerProperties 供应商配置
-     * @return Chat Completions 地址
-     */
-    private URI chatCompletionsUri(ProviderProperties providerProperties) {
-        String baseUrl = providerProperties.getBaseUrl().trim();
-        String normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        if (normalizedBaseUrl.endsWith("/chat/completions")) {
-            return URI.create(normalizedBaseUrl);
-        }
-        return URI.create(normalizedBaseUrl + "/chat/completions");
-    }
-
-    /**
      * 获取候选分类名称。
      *
      * @param requestCategoryNames 请求中的候选分类
@@ -386,15 +253,6 @@ public class LlmSummaryService {
      */
     private String safeText(String value) {
         return value == null ? "" : value.trim();
-    }
-
-    /**
-     * 获取请求超时时间。
-     *
-     * @return 请求超时时间
-     */
-    private int timeoutSeconds() {
-        return Math.max(properties.getLlm().getTimeoutSeconds(), 1);
     }
 
     /**

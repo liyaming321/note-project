@@ -148,6 +148,45 @@ public class HybridSearchService {
     }
 
     /**
+     * 查询混合搜索候选结果，供知识库问答复用。
+     *
+     * @param keyword 搜索关键词或自然语言问题
+     * @param tag 标签筛选
+     * @param category 分类筛选
+     * @param language 语言筛选
+     * @param status 发布状态筛选
+     * @param updatedFrom 更新时间开始日期
+     * @param updatedTo 更新时间结束日期
+     * @param limit 最大数量
+     * @return 混合搜索结果
+     */
+    @Transactional(readOnly = true)
+    public List<HybridSearchResultResponse> topResults(
+            String keyword,
+            String tag,
+            String category,
+            String language,
+            NoteStatus status,
+            LocalDate updatedFrom,
+            LocalDate updatedTo,
+            int limit
+    ) {
+        PageResponse<HybridSearchResultResponse> page = search(
+                keyword,
+                "all",
+                tag,
+                category,
+                language,
+                status,
+                updatedFrom,
+                updatedTo,
+                0,
+                Math.max(1, Math.min(limit, MAX_SIZE))
+        );
+        return page.items();
+    }
+
+    /**
      * 加载语义候选，配置缺失时降级为全文候选。
      *
      * @param keyword 关键词或自然语言问题

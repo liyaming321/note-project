@@ -3,9 +3,12 @@ package com.knowledgebase.controller;
 import com.knowledgebase.dto.ApiResponse;
 import com.knowledgebase.dto.BookmarkImportResponse;
 import com.knowledgebase.dto.ExportZipRequest;
+import com.knowledgebase.dto.LinkImportPreviewResponse;
+import com.knowledgebase.dto.LinkImportRequest;
 import com.knowledgebase.dto.MarkdownImportResponse;
 import com.knowledgebase.service.BookmarkImportService;
 import com.knowledgebase.service.ImportExportService;
+import com.knowledgebase.service.LinkImportService;
 import jakarta.validation.Valid;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -27,19 +30,23 @@ public class ImportExportController {
 
     private final ImportExportService importExportService;
     private final BookmarkImportService bookmarkImportService;
+    private final LinkImportService linkImportService;
 
     /**
      * 创建 Markdown 导入导出控制器。
      *
      * @param importExportService Markdown 导入导出服务
      * @param bookmarkImportService 浏览器书签导入服务
+     * @param linkImportService 链接导入预览服务
      */
     public ImportExportController(
             ImportExportService importExportService,
-            BookmarkImportService bookmarkImportService
+            BookmarkImportService bookmarkImportService,
+            LinkImportService linkImportService
     ) {
         this.importExportService = importExportService;
         this.bookmarkImportService = bookmarkImportService;
+        this.linkImportService = linkImportService;
     }
 
     /**
@@ -62,6 +69,17 @@ public class ImportExportController {
     @PostMapping(value = "/api/import/bookmarks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<BookmarkImportResponse> importBookmarks(@RequestPart("file") MultipartFile file) {
         return ApiResponse.success("书签导入完成", bookmarkImportService.importBookmarks(file));
+    }
+
+    /**
+     * 根据链接抓取网页并生成新建笔记预览。
+     *
+     * @param request 链接导入请求
+     * @return 新建笔记预览
+     */
+    @PostMapping("/api/import/link")
+    public ApiResponse<LinkImportPreviewResponse> importLink(@Valid @RequestBody LinkImportRequest request) {
+        return ApiResponse.success("链接解析完成", linkImportService.preview(request));
     }
 
     /**

@@ -73,7 +73,6 @@
     <main class="workspace-main-shell">
       <header class="workspace-topbar">
         <div class="topbar-left">
-          <h1>知识库</h1>
           <span class="topbar-helper">{{ note ? '正在阅读笔记' : '正在加载笔记' }}</span>
         </div>
         <div class="topbar-actions">
@@ -211,6 +210,34 @@
                   <a-empty v-else :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无历史版本" />
                 </a-spin>
               </div>
+
+              <div class="similar-note-panel">
+                <div class="history-panel-heading">
+                  <div>
+                    <span>可能相关</span>
+                    <small>{{ similarNotes.length }}</small>
+                  </div>
+                  <a-button type="text" size="small" :loading="similarLoading" @click="loadSimilarNotes">
+                    刷新
+                  </a-button>
+                </div>
+                <a-spin :spinning="similarLoading">
+                  <div v-if="similarNotes.length > 0" class="similar-note-list">
+                    <button
+                      v-for="item in similarNotes"
+                      :key="item.id"
+                      class="similar-note-item"
+                      type="button"
+                      @click="router.push(`/notes/${item.id}`)"
+                    >
+                      <strong>{{ item.title }}</strong>
+                      <span>{{ item.reason }}</span>
+                      <small>{{ resolveSimilarSource(item.source) }} · {{ Math.round(item.similarityScore * 100) }}%</small>
+                    </button>
+                  </div>
+                  <a-empty v-else :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无相似笔记" />
+                </a-spin>
+              </div>
             </aside>
 
             <a-spin :spinning="loading" class="detail-main-card">
@@ -344,12 +371,13 @@ import {
   fetchNote,
   fetchNoteHistory,
   fetchNoteHistoryVersion,
+  fetchSimilarNotes,
   fetchTags,
   permanentlyDeleteNote,
   restoreNote,
   revertNoteToHistory
 } from '@/api/knowledgeBase'
-import type { Category, NoteDetail, NoteHistoryDetail, NoteHistorySummary, NoteStatus, Tag } from '@/types/api'
+import type { Category, NoteDetail, NoteHistoryDetail, NoteHistorySummary, NoteStatus, SimilarNote, Tag } from '@/types/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -363,6 +391,7 @@ type WorkspaceView = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
 
 const loading = ref(false)
 const historyLoading = ref(false)
+const similarLoading = ref(false)
 const reverting = ref(false)
 const savingCategory = ref(false)
 const categoryManagerVisible = ref(false)
@@ -371,6 +400,7 @@ const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
 const note = ref<NoteDetail>()
 const historyItems = ref<NoteHistorySummary[]>([])
+const similarNotes = ref<SimilarNote[]>([])
 const selectedHistory = ref<NoteHistoryDetail>()
 const previewRef = ref<HTMLDivElement>()
 const categoryForm = reactive<{
@@ -402,13 +432,28 @@ async function loadTags() {
 async function loadNote() {
   loading.value = true
   selectedHistory.value = undefined
+  similarNotes.value = []
   try {
     note.value = await fetchNote(Number(route.params.id))
-    await loadHistoryItems()
+    await Promise.all([loadHistoryItems(), loadSimilarNotes()])
   } catch (error) {
     message.error((error as Error).message)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSimilarNotes() {
+  if (!note.value) {
+    return
+  }
+  similarLoading.value = true
+  try {
+    similarNotes.value = await fetchSimilarNotes(note.value.id, 6)
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    similarLoading.value = false
   }
 }
 
@@ -585,6 +630,16 @@ function resolveContentState() {
     return '已归档'
   }
   return note.value.status === 'DRAFT' ? '草稿' : '已发布'
+}
+
+function resolveSimilarSource(source: string) {
+  if (source === 'vector') {
+    return '语义相近'
+  }
+  if (source === 'more-like-this') {
+    return '全文相似'
+  }
+  return '标签分类'
 }
 
 function goWorkspaceView(view: WorkspaceView) {

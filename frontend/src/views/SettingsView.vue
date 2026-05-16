@@ -73,7 +73,6 @@
     <main class="workspace-main-shell">
       <header class="workspace-topbar">
         <div class="topbar-left">
-          <h1>知识库</h1>
           <span class="topbar-helper">设置与维护</span>
         </div>
         <div class="topbar-actions">
@@ -213,6 +212,31 @@
               </div>
               <a-button type="primary" :loading="reindexing" @click="rebuildIndex">重建索引</a-button>
             </div>
+            <div class="settings-action-card">
+              <div>
+                <strong>检查索引健康状态</strong>
+                <span>{{ indexHealth?.message || '对比数据库有效笔记、全文索引和向量索引数量' }}</span>
+              </div>
+              <a-button :loading="healthChecking" @click="checkIndexHealth">检查健康状态</a-button>
+            </div>
+            <div v-if="indexHealth" class="settings-grid health-grid">
+              <div>
+                <span>数据库有效笔记</span>
+                <strong>{{ indexHealth.databaseActiveCount }}</strong>
+              </div>
+              <div>
+                <span>全文索引数量</span>
+                <strong>{{ indexHealth.searchIndexedCount }}</strong>
+              </div>
+              <div>
+                <span>向量索引数量</span>
+                <strong>{{ indexHealth.vectorIndexedCount }}</strong>
+              </div>
+              <div>
+                <span>健康状态</span>
+                <strong>{{ indexHealth.searchHealthy && indexHealth.vectorHealthy ? '健康' : '需维护' }}</strong>
+              </div>
+            </div>
           </div>
 
           <div v-else-if="activePanel === 'vector'" class="settings-section-panel">
@@ -263,6 +287,13 @@
               <a-button type="primary" :loading="vectorReindexing" :disabled="!vectorIndexInfo?.configured" @click="rebuildVector">
                 重建向量索引
               </a-button>
+            </div>
+            <div class="settings-action-card">
+              <div>
+                <strong>清理无效向量</strong>
+                <span>{{ vectorCleanupMessage || '删除数据库中已不存在或已归档笔记对应的向量文档' }}</span>
+              </div>
+              <a-button :loading="vectorCleaning" @click="cleanupVectors">清理无效向量</a-button>
             </div>
             <p class="settings-note">
               需要配置 KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_EXECUTABLE 和 KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_MODEL。
@@ -376,17 +407,19 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
+  cleanupVectorIndex,
   createCategory,
   exportBackup,
   fetchCategories,
   fetchEmbeddingProvider,
+  fetchIndexHealth,
   fetchTags,
   fetchVectorIndexInfo,
   fetchWorkspaceInfo,
   rebuildSearchIndex,
   rebuildVectorIndex
 } from '@/api/knowledgeBase'
-import type { AdminVectorIndexInfo, AdminWorkspaceInfo, Category, EmbeddingProviderInfo, Tag } from '@/types/api'
+import type { AdminIndexHealth, AdminVectorIndexInfo, AdminWorkspaceInfo, Category, EmbeddingProviderInfo, Tag } from '@/types/api'
 
 const router = useRouter()
 type CategoryTreeNode = {
@@ -401,11 +434,15 @@ const loading = ref(false)
 const backingUp = ref(false)
 const reindexing = ref(false)
 const vectorReindexing = ref(false)
+const healthChecking = ref(false)
+const vectorCleaning = ref(false)
 const savingCategory = ref(false)
 const categoryManagerVisible = ref(false)
 const workspaceInfo = ref<AdminWorkspaceInfo>()
 const vectorIndexInfo = ref<AdminVectorIndexInfo>()
+const indexHealth = ref<AdminIndexHealth>()
 const embeddingProvider = ref<EmbeddingProviderInfo>()
+const vectorCleanupMessage = ref('')
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
 const activePanel = ref<'overview' | 'index' | 'vector' | 'backup' | 'help'>('overview')
@@ -446,10 +483,38 @@ async function rebuildVector() {
     const result = await rebuildVectorIndex()
     message.success(`向量索引已重建，共 ${result.indexedCount} 篇笔记，维度 ${result.dimension}`)
     vectorIndexInfo.value = await fetchVectorIndexInfo()
+    indexHealth.value = await fetchIndexHealth()
   } catch (error) {
     message.error((error as Error).message)
   } finally {
     vectorReindexing.value = false
+  }
+}
+
+async function cleanupVectors() {
+  vectorCleaning.value = true
+  try {
+    const result = await cleanupVectorIndex()
+    vectorCleanupMessage.value = `${result.message}，清理 ${result.removedCount} 条，当前 ${result.indexedCount} 条`
+    message.success(vectorCleanupMessage.value)
+    vectorIndexInfo.value = await fetchVectorIndexInfo()
+    indexHealth.value = await fetchIndexHealth()
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    vectorCleaning.value = false
+  }
+}
+
+async function checkIndexHealth() {
+  healthChecking.value = true
+  try {
+    indexHealth.value = await fetchIndexHealth()
+    message.success(indexHealth.value.message)
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    healthChecking.value = false
   }
 }
 
@@ -458,6 +523,7 @@ async function rebuildIndex() {
   try {
     const result = await rebuildSearchIndex()
     message.success(`索引已重建，共 ${result.indexedCount} 篇笔记`)
+    indexHealth.value = await fetchIndexHealth()
   } catch (error) {
     message.error((error as Error).message)
   } finally {

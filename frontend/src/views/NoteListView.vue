@@ -73,7 +73,6 @@
     <main class="workspace-main-shell">
       <header class="workspace-topbar">
         <div class="topbar-left">
-          <h1>知识库</h1>
           <div class="topbar-search">
             <a-select
               v-model:value="searchForm.mode"
@@ -97,6 +96,9 @@
             <template #icon><PlusOutlined /></template>
             新建笔记
           </a-button>
+          <a-button size="large" @click="openKnowledgeQa">
+            问知识库
+          </a-button>
           <a-dropdown trigger="click">
             <button class="topbar-text-button more-actions-button" type="button">
               更多
@@ -106,6 +108,7 @@
               <a-menu>
                 <a-menu-item key="import" @click="openImportPicker">导入 Markdown</a-menu-item>
                 <a-menu-item key="bookmark" @click="openBookmarkImportPicker">导入书签</a-menu-item>
+                <a-menu-item key="link" @click="openLinkImport">导入链接</a-menu-item>
                 <a-menu-item key="export" :disabled="exporting" @click="exportCurrentPage">导出当前页</a-menu-item>
                 <a-menu-item key="backup" :disabled="backingUp" @click="backupWorkspace">下载备份</a-menu-item>
               </a-menu>
@@ -145,8 +148,55 @@
             <span v-if="activeFilterSummaries.length === 0">当前展示 {{ currentViewTitle }}，可通过分类、标签或更多筛选缩小范围。</span>
             <template v-else>
               <span v-for="item in activeFilterSummaries" :key="item" class="filter-summary-pill">{{ item }}</span>
+              <button class="filter-clear-button" type="button" @click="copySearchConditions">复制条件</button>
               <button class="filter-clear-button" type="button" @click="resetWorkspace">清除筛选</button>
             </template>
+          </div>
+          <div class="search-memory-panel">
+            <div class="search-memory-heading">
+              <span>搜索历史</span>
+              <div>
+                <a-button type="link" size="small" @click="copySearchConditions">复制当前条件</a-button>
+                <a-button type="link" size="small" :disabled="searchHistory.length === 0" @click="clearSearchHistory">
+                  清空历史
+                </a-button>
+              </div>
+            </div>
+            <div v-if="searchHistory.length > 0" class="search-memory-groups">
+              <div class="search-memory-group">
+                <small>最近搜索</small>
+                <div
+                  v-for="item in searchHistory.slice(0, 5)"
+                  :key="item.id"
+                  class="search-memory-row"
+                >
+                  <button
+                    class="search-memory-chip"
+                    type="button"
+                    @click="applySearchHistory(item)"
+                  >
+                    {{ item.label }}
+                  </button>
+                  <button class="search-memory-favorite" type="button" @click="toggleSearchFavorite(item)">
+                    {{ item.favorite ? '取消常用' : '设为常用' }}
+                  </button>
+                </div>
+              </div>
+              <div class="search-memory-group">
+                <small>常用搜索</small>
+                <button
+                  v-for="item in favoriteSearches"
+                  :key="item.id"
+                  class="search-memory-chip favorite"
+                  type="button"
+                  @click="applySearchHistory(item)"
+                >
+                  {{ item.label }}
+                </button>
+                <span v-if="favoriteSearches.length === 0" class="search-memory-empty">点击最近搜索右侧“设为常用”后会展示在这里</span>
+              </div>
+            </div>
+            <div v-else class="search-memory-empty">还没有搜索历史，执行一次搜索后会自动记录。</div>
           </div>
           <div class="filter-grid primary">
             <label class="filter-control">
@@ -498,6 +548,36 @@
       </div>
     </a-modal>
 
+    <a-modal v-model:open="linkImportVisible" title="导入链接" width="680px" :footer="null">
+      <div class="link-import-panel">
+        <div class="knowledge-qa-intro">
+          <strong>从网页生成新笔记草稿</strong>
+          <span>系统会读取网页正文，调用 LLM 生成标题、摘要、标签和分类建议，然后跳转到新建页预览，确认后再保存。</span>
+        </div>
+        <a-input
+          v-model:value="linkImportUrl"
+          placeholder="https://example.com/article"
+          @pressEnter="importCurrentLink"
+        />
+        <div class="knowledge-qa-actions">
+          <a-select v-model:value="linkImportProvider" class="llm-provider-select">
+            <a-select-option
+              v-for="provider in llmProviders"
+              :key="provider.name"
+              :value="provider.name"
+            >
+              {{ provider.name === 'bailian' ? '阿里百炼' : 'DeepSeek' }}
+              {{ provider.configured ? '' : '（未配置）' }}
+            </a-select-option>
+          </a-select>
+          <a-button type="primary" :loading="linkImporting" @click="importCurrentLink">
+            抓取并生成预览
+          </a-button>
+        </div>
+        <p class="settings-note">导入链接会把网页正文片段发送给所选 LLM 供应商，请避免处理敏感网页。</p>
+      </div>
+    </a-modal>
+
     <a-modal v-model:open="helpVisible" title="帮助与快捷键" width="680px" :footer="null">
       <div class="help-panel">
         <div>
@@ -511,6 +591,69 @@
         <div>
           <h3>状态说明</h3>
           <p>白色卡片表示已发布，蓝色卡片表示草稿；归档内容默认不出现在所有笔记，回收站展示已删除内容。</p>
+        </div>
+      </div>
+    </a-modal>
+
+    <a-modal v-model:open="qaVisible" title="问知识库" width="820px" :footer="null">
+      <div class="knowledge-qa-panel">
+        <div class="knowledge-qa-intro">
+          <strong>基于当前知识库回答问题</strong>
+          <span>系统会先使用混合搜索召回相关笔记，再调用已配置的阿里百炼或 DeepSeek 生成回答，并返回引用来源。</span>
+        </div>
+        <div class="knowledge-qa-form">
+          <a-textarea
+            v-model:value="qaQuestion"
+            :rows="3"
+            :maxlength="500"
+            show-count
+            placeholder="例如：这个项目的向量索引怎么配置？"
+          />
+          <div class="knowledge-qa-actions">
+            <a-select v-model:value="qaProvider" class="llm-provider-select" placeholder="选择模型供应商">
+              <a-select-option
+                v-for="provider in llmProviders"
+                :key="provider.name"
+                :value="provider.name"
+              >
+                {{ provider.name === 'bailian' ? '阿里百炼' : 'DeepSeek' }}
+                {{ provider.configured ? '' : '（未配置）' }}
+              </a-select-option>
+            </a-select>
+            <a-select v-model:value="qaTopK" class="qa-topk-select">
+              <a-select-option :value="3">引用 3 篇</a-select-option>
+              <a-select-option :value="5">引用 5 篇</a-select-option>
+              <a-select-option :value="8">引用 8 篇</a-select-option>
+            </a-select>
+            <a-button type="primary" :loading="qaLoading" @click="askCurrentQuestion">提问</a-button>
+          </div>
+          <p class="settings-note">会复用当前搜索筛选条件：{{ buildSearchConditionText() }}</p>
+        </div>
+        <div class="knowledge-qa-thread">
+          <article v-for="item in qaThread" :key="item.id" class="knowledge-qa-answer">
+            <div class="knowledge-qa-question">问：{{ item.question }}</div>
+            <div v-if="item.error" class="knowledge-qa-error">{{ item.error }}</div>
+            <template v-else-if="item.result">
+              <p class="knowledge-qa-answer-text">{{ item.result.answer }}</p>
+              <div class="knowledge-qa-meta">
+                <span>{{ item.result.provider || '未调用模型' }} / {{ item.result.model || '无模型' }}</span>
+                <span>{{ item.result.citations.length }} 个引用</span>
+              </div>
+              <div v-if="item.result.citations.length > 0" class="knowledge-qa-citations">
+                <button
+                  v-for="citation in item.result.citations"
+                  :key="citation.noteId"
+                  class="knowledge-qa-citation"
+                  type="button"
+                  @click="router.push(citation.url)"
+                >
+                  <strong>{{ citation.title }}</strong>
+                  <span>{{ citation.snippet }}</span>
+                </button>
+              </div>
+            </template>
+          </article>
+          <a-empty v-if="qaThread.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="还没有提问" />
         </div>
       </div>
     </a-modal>
@@ -545,6 +688,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
+  askKnowledgeBase,
   batchRestoreNotes,
   changeArchived,
   changeFavorite,
@@ -555,9 +699,11 @@ import {
   exportBackup,
   exportNotesZip,
   fetchCategories,
+  fetchLlmProviders,
   fetchNotes,
   fetchTags,
   importBookmarks,
+  importLink,
   importMarkdown,
   permanentlyDeleteNote,
   reorderNotes,
@@ -566,6 +712,9 @@ import {
 } from '@/api/knowledgeBase'
 import type {
   Category,
+  KnowledgeQaResult,
+  LinkImportDraft,
+  LlmProviderInfo,
   NoteListItem,
   NoteQuery,
   NoteStatus,
@@ -598,6 +747,30 @@ type NoteCardItem = NoteListItem & Partial<SearchResult>
 type ViewMode = 'grid' | 'list'
 type NavFilter = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
 type UpdatedRangeMode = 'all' | 'today' | '7d' | '30d' | 'custom'
+type SearchHistoryItem = {
+  id: string
+  label: string
+  keyword: string
+  mode: SearchMode
+  scope: SearchScope
+  tag?: string
+  category?: string
+  language?: string
+  status?: NoteStatus
+  updatedFrom?: string
+  updatedTo?: string
+  favorite: boolean
+  createdAt: string
+}
+type KnowledgeQaThreadItem = {
+  id: string
+  question: string
+  result?: KnowledgeQaResult
+  error?: string
+}
+
+const SEARCH_HISTORY_STORAGE_KEY = 'people-wiki-search-history'
+const LINK_IMPORT_DRAFT_PREFIX = 'people-wiki-link-import-draft:'
 
 const loading = ref(false)
 const exporting = ref(false)
@@ -617,6 +790,18 @@ const customUpdatedTo = ref<string>()
 const advancedFiltersOpen = ref(false)
 const categoryManagerVisible = ref(false)
 const helpVisible = ref(false)
+const linkImportVisible = ref(false)
+const linkImporting = ref(false)
+const linkImportUrl = ref('')
+const linkImportProvider = ref<'bailian' | 'deepseek'>('bailian')
+const qaVisible = ref(false)
+const qaLoading = ref(false)
+const qaQuestion = ref('')
+const qaProvider = ref<'bailian' | 'deepseek'>('bailian')
+const qaTopK = ref(5)
+const qaThread = ref<KnowledgeQaThreadItem[]>([])
+const llmProviders = ref<LlmProviderInfo[]>([])
+const searchHistory = ref<SearchHistoryItem[]>([])
 const savingCategory = ref(false)
 const editingCategoryId = ref<number>()
 const categoryForm = reactive<{
@@ -765,10 +950,12 @@ const topKeywords = computed(() => {
     .filter(Boolean)
   return Array.from(new Set(noteTagNames)).slice(0, 3).concat(noteTagNames.length === 0 ? ['全部'] : [])
 })
+const favoriteSearches = computed(() => searchHistory.value.filter(item => item.favorite).slice(0, 5))
 
 onMounted(async () => {
+  loadSearchHistory()
   syncQueryFromRoute()
-  await Promise.all([loadCategories(), loadTags(), loadNotes()])
+  await Promise.all([loadCategories(), loadTags(), loadLlmProviders(), loadNotes()])
 })
 
 watch(
@@ -829,6 +1016,22 @@ async function loadTags() {
   tags.value = await fetchTags()
 }
 
+async function loadLlmProviders() {
+  try {
+    llmProviders.value = await fetchLlmProviders()
+    const configuredProvider = llmProviders.value.find(provider => provider.configured)
+    if (configuredProvider) {
+      qaProvider.value = configuredProvider.name
+      linkImportProvider.value = configuredProvider.name
+    }
+  } catch {
+    llmProviders.value = [
+      { name: 'bailian', model: '', configured: false },
+      { name: 'deepseek', model: '', configured: false }
+    ]
+  }
+}
+
 async function handleSearchModeChange(value: SearchMode) {
   searchForm.mode = value
   if (value === 'semantic') {
@@ -870,6 +1073,7 @@ async function executeSearch() {
     return
   }
   query.page = 0
+  recordSearchHistory()
   await router.replace({
     path: '/',
     query: buildSearchRouteQuery()
@@ -893,6 +1097,121 @@ async function clearSearch() {
   clearSearchState()
   await router.replace({ path: '/', query: {} })
   await loadNotes()
+}
+
+function loadSearchHistory() {
+  try {
+    const rawValue = window.localStorage.getItem(SEARCH_HISTORY_STORAGE_KEY)
+    const parsedValue = rawValue ? JSON.parse(rawValue) : []
+    searchHistory.value = Array.isArray(parsedValue)
+      ? parsedValue.filter(isSearchHistoryItem).slice(0, 20)
+      : []
+  } catch {
+    searchHistory.value = []
+  }
+}
+
+function persistSearchHistory() {
+  window.localStorage.setItem(SEARCH_HISTORY_STORAGE_KEY, JSON.stringify(searchHistory.value.slice(0, 20)))
+}
+
+function recordSearchHistory() {
+  const snapshot = currentSearchSnapshot()
+  if (!hasMeaningfulSearchSnapshot(snapshot)) {
+    return
+  }
+  const existingItem = searchHistory.value.find(item => sameSearchSnapshot(item, snapshot))
+  const nextItem: SearchHistoryItem = {
+    ...snapshot,
+    id: existingItem?.id ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    label: buildHistoryLabel(snapshot),
+    favorite: existingItem?.favorite ?? false,
+    createdAt: new Date().toISOString()
+  }
+  searchHistory.value = [
+    nextItem,
+    ...searchHistory.value.filter(item => item.id !== nextItem.id)
+  ].slice(0, 20)
+  persistSearchHistory()
+}
+
+async function applySearchHistory(item: SearchHistoryItem) {
+  searchForm.keyword = item.keyword
+  searchForm.mode = item.mode
+  searchForm.scope = item.scope
+  searchForm.tag = item.tag
+  searchForm.category = item.category
+  searchForm.language = item.language
+  selectedStatus.value = item.status
+  query.updatedFrom = item.updatedFrom
+  query.updatedTo = item.updatedTo
+  query.page = 0
+  await router.replace({ path: '/', query: buildSearchRouteQuery() })
+  await loadNotes()
+}
+
+function toggleSearchFavorite(item: SearchHistoryItem) {
+  searchHistory.value = searchHistory.value.map(historyItem =>
+    historyItem.id === item.id ? { ...historyItem, favorite: !historyItem.favorite } : historyItem
+  )
+  persistSearchHistory()
+}
+
+function clearSearchHistory() {
+  searchHistory.value = []
+  persistSearchHistory()
+  message.success('搜索历史已清空')
+}
+
+async function copySearchConditions() {
+  const text = buildSearchConditionText()
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('搜索条件已复制')
+  } catch {
+    message.error('复制失败，请检查浏览器剪贴板权限')
+  }
+}
+
+function openKnowledgeQa() {
+  qaVisible.value = true
+  if (!qaQuestion.value.trim() && searchForm.keyword.trim()) {
+    qaQuestion.value = searchForm.keyword.trim()
+  }
+}
+
+async function askCurrentQuestion() {
+  const question = qaQuestion.value.trim()
+  if (!question) {
+    message.warning('请输入要提问的问题')
+    return
+  }
+  qaLoading.value = true
+  try {
+    const result = await askKnowledgeBase({
+      question,
+      provider: qaProvider.value,
+      topK: qaTopK.value,
+      tag: searchForm.tag || query.tag,
+      category: searchForm.category || (query.categoryId ? String(query.categoryId) : undefined),
+      language: searchForm.language,
+      status: selectedStatus.value,
+      updatedFrom: query.updatedFrom,
+      updatedTo: query.updatedTo
+    })
+    qaThread.value = [
+      { id: `${Date.now()}`, question, result },
+      ...qaThread.value
+    ]
+    qaQuestion.value = ''
+  } catch (error) {
+    qaThread.value = [
+      { id: `${Date.now()}`, question, error: (error as Error).message },
+      ...qaThread.value
+    ]
+  } finally {
+    qaLoading.value = false
+  }
 }
 
 async function resetWorkspace() {
@@ -1016,6 +1335,42 @@ function openImportPicker() {
 
 function openBookmarkImportPicker() {
   bookmarkImportInputRef.value?.click()
+}
+
+function openLinkImport() {
+  linkImportVisible.value = true
+  if (llmProviders.value.length === 0) {
+    void loadLlmProviders()
+  }
+}
+
+async function importCurrentLink() {
+  const url = linkImportUrl.value.trim()
+  if (!url) {
+    message.warning('请输入要导入的网页链接')
+    return
+  }
+  linkImporting.value = true
+  try {
+    const preview = await importLink({
+      url,
+      provider: linkImportProvider.value
+    })
+    const draftId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const draft: LinkImportDraft = {
+      ...preview,
+      createdAt: new Date().toISOString()
+    }
+    window.localStorage.setItem(`${LINK_IMPORT_DRAFT_PREFIX}${draftId}`, JSON.stringify(draft))
+    linkImportVisible.value = false
+    linkImportUrl.value = ''
+    message.success('链接已整理，正在进入新建笔记预览')
+    await router.push({ path: '/notes/new', query: { draftId } })
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    linkImporting.value = false
+  }
 }
 
 async function handleImportFiles(event: Event) {
@@ -1334,6 +1689,91 @@ function buildSearchRouteQuery() {
     queryObject.size = String(query.size)
   }
   return queryObject
+}
+
+function currentSearchSnapshot() {
+  return {
+    keyword: searchForm.keyword.trim(),
+    mode: searchForm.mode,
+    scope: searchForm.scope,
+    tag: searchForm.tag || query.tag,
+    category: searchForm.category || (query.categoryId ? String(query.categoryId) : undefined),
+    language: searchForm.language,
+    status: selectedStatus.value,
+    updatedFrom: query.updatedFrom,
+    updatedTo: query.updatedTo
+  }
+}
+
+function hasMeaningfulSearchSnapshot(snapshot: ReturnType<typeof currentSearchSnapshot>) {
+  return Boolean(
+    snapshot.keyword ||
+    snapshot.tag ||
+    snapshot.category ||
+    snapshot.language ||
+    snapshot.status ||
+    snapshot.updatedFrom ||
+    snapshot.updatedTo
+  )
+}
+
+function sameSearchSnapshot(item: SearchHistoryItem, snapshot: ReturnType<typeof currentSearchSnapshot>) {
+  return item.keyword === snapshot.keyword &&
+    item.mode === snapshot.mode &&
+    item.scope === snapshot.scope &&
+    item.tag === snapshot.tag &&
+    item.category === snapshot.category &&
+    item.language === snapshot.language &&
+    item.status === snapshot.status &&
+    item.updatedFrom === snapshot.updatedFrom &&
+    item.updatedTo === snapshot.updatedTo
+}
+
+function buildHistoryLabel(snapshot: ReturnType<typeof currentSearchSnapshot>) {
+  const parts = [
+    snapshot.keyword || '无关键词',
+    resolveSearchModeLabel(snapshot.mode),
+    snapshot.tag ? `#${snapshot.tag}` : '',
+    snapshot.category ? resolveCategoryLabel(snapshot.category) : '',
+    snapshot.language || '',
+    snapshot.status ? (snapshot.status === 'DRAFT' ? '草稿' : '已发布') : ''
+  ].filter(Boolean)
+  return parts.slice(0, 4).join(' · ')
+}
+
+function buildSearchConditionText() {
+  const snapshot = currentSearchSnapshot()
+  const lines = [
+    `关键词：${snapshot.keyword || '无'}`,
+    `搜索模式：${resolveSearchModeLabel(snapshot.mode)}`,
+    `搜索范围：${snapshot.scope === 'all' ? '全部' : snapshot.scope === 'title' ? '标题' : '代码'}`,
+    `标签：${snapshot.tag || '不限'}`,
+    `分类：${snapshot.category ? resolveCategoryLabel(snapshot.category) : '不限'}`,
+    `语言：${snapshot.language || '不限'}`,
+    `发布状态：${snapshot.status ? (snapshot.status === 'DRAFT' ? '草稿' : '已发布') : '不限'}`,
+    `更新时间：${snapshot.updatedFrom || '不限'} 至 ${snapshot.updatedTo || '不限'}`
+  ]
+  return lines.join('\n')
+}
+
+function resolveCategoryLabel(categoryValue: string) {
+  const categoryId = Number(categoryValue)
+  if (!Number.isFinite(categoryId)) {
+    return categoryValue
+  }
+  return findCategoryName(categories.value, categoryId) || categoryValue
+}
+
+function isSearchHistoryItem(value: unknown): value is SearchHistoryItem {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const item = value as Partial<SearchHistoryItem>
+  return typeof item.id === 'string' &&
+    typeof item.label === 'string' &&
+    typeof item.keyword === 'string' &&
+    isSearchModeValue(item.mode) &&
+    isSearchScope(item.scope)
 }
 
 function resolveSelectedCategoryName() {

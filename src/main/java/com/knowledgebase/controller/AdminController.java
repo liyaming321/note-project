@@ -3,12 +3,15 @@ package com.knowledgebase.controller;
 import com.knowledgebase.KnowledgeBaseApplication;
 import com.knowledgebase.config.KnowledgeBaseProperties;
 import com.knowledgebase.dto.AdminReindexResponse;
+import com.knowledgebase.dto.AdminIndexHealthResponse;
 import com.knowledgebase.dto.AdminVectorIndexInfoResponse;
+import com.knowledgebase.dto.AdminVectorCleanupResponse;
 import com.knowledgebase.dto.AdminVectorReindexResponse;
 import com.knowledgebase.dto.AdminWorkspaceInfoResponse;
 import com.knowledgebase.dto.ApiResponse;
 import com.knowledgebase.dto.EmbeddingProviderResponse;
 import com.knowledgebase.service.BackupService;
+import com.knowledgebase.service.IndexMaintenanceService;
 import com.knowledgebase.service.IndexService;
 import com.knowledgebase.service.VectorIndexService;
 import java.nio.file.Paths;
@@ -30,6 +33,7 @@ public class AdminController {
 
     private final IndexService indexService;
     private final VectorIndexService vectorIndexService;
+    private final IndexMaintenanceService indexMaintenanceService;
     private final BackupService backupService;
     private final KnowledgeBaseProperties properties;
 
@@ -38,17 +42,20 @@ public class AdminController {
      *
      * @param indexService 索引服务
      * @param vectorIndexService 向量索引服务
+     * @param indexMaintenanceService 索引运维服务
      * @param backupService 备份服务
      * @param properties 知识库配置
      */
     public AdminController(
             IndexService indexService,
             VectorIndexService vectorIndexService,
+            IndexMaintenanceService indexMaintenanceService,
             BackupService backupService,
             KnowledgeBaseProperties properties
     ) {
         this.indexService = indexService;
         this.vectorIndexService = vectorIndexService;
+        this.indexMaintenanceService = indexMaintenanceService;
         this.backupService = backupService;
         this.properties = properties;
     }
@@ -98,6 +105,26 @@ public class AdminController {
     @PostMapping("/vector-index/rebuild")
     public ApiResponse<AdminVectorReindexResponse> rebuildVectorIndex() {
         return ApiResponse.success("向量索引重建成功", vectorIndexService.rebuild());
+    }
+
+    /**
+     * 检查全文和向量索引健康状态。
+     *
+     * @return 索引健康状态
+     */
+    @GetMapping("/index-health")
+    public ApiResponse<AdminIndexHealthResponse> indexHealth() {
+        return ApiResponse.success(indexMaintenanceService.health());
+    }
+
+    /**
+     * 清理无效向量索引。
+     *
+     * @return 清理结果
+     */
+    @PostMapping("/vector-index/cleanup")
+    public ApiResponse<AdminVectorCleanupResponse> cleanupVectorIndex() {
+        return ApiResponse.success("无效向量清理成功", indexMaintenanceService.cleanupInvalidVectors());
     }
 
     /**

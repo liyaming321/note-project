@@ -22,10 +22,13 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.LongPoint;
@@ -34,6 +37,8 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.VectorSimilarityFunction;
@@ -47,6 +52,7 @@ import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.Bits;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.HtmlUtils;
@@ -237,6 +243,94 @@ public class VectorIndexService {
      */
     public Path getVectorIndexPath() {
         return vectorIndexPath;
+    }
+
+    /**
+     * 获取向量索引文档数量。
+     *
+     * @return 文档数量
+     */
+    public int indexedCount() {
+        return readMetadata().indexedCount();
+    }
+
+    /**
+     * 清理数据库中已无效的向量索引文档。
+     *
+     * @param activeNoteIds 当前有效笔记ID
+     * @return 清理数量
+     */
+    public synchronized int cleanupInvalidVectors(Collection<Long> activeNoteIds) {
+        if (Files.notExists(vectorIndexPath)) {
+            return 0;
+        }
+        Set<String> activeIds = new HashSet<>();
+        for (Long noteId : activeNoteIds) {
+            if (noteId != null) {
+                activeIds.add(String.valueOf(noteId));
+            }
+        }
+        try (Directory directory = openDirectory()) {
+            if (!DirectoryReader.indexExists(directory)) {
+                return 0;
+            }
+            VectorIndexMetadata metadata = readMetadata(directory);
+            List<String> indexedIds = collectIndexedNoteIds(directory);
+            List<String> invalidIds = indexedIds.stream()
+                    .filter(noteId -> !activeIds.contains(noteId))
+                    .toList();
+            if (invalidIds.isEmpty()) {
+                return 0;
+            }
+            try (IndexWriter writer = createWriter(directory, IndexWriterConfig.OpenMode.CREATE_OR_APPEND)) {
+                for (String invalidId : invalidIds) {
+                    writer.deleteDocuments(new Term(VectorIndexFields.ID, invalidId));
+                }
+                writer.setLiveCommitData(commitData(
+                        metadata.dimension(),
+                        Math.max(metadata.indexedCount() - invalidIds.size(), 0),
+                        metadata.lastRebuiltAt()
+                ));
+            }
+            return invalidIds.size();
+        } catch (IOException ex) {
+            throw new BusinessException("清理向量索引失败：" + ex.getMessage());
+        }
+    }
+
+    /**
+     * 基于指定笔记内容查询相似向量候选。
+     *
+     * @param note 笔记
+     * @param maxCandidates 最大候选数量
+     * @return 语义候选
+     */
+    public SemanticSearchHits searchSimilarNoteHits(Note note, int maxCandidates) {
+        if (note == null || note.getId() == null) {
+            return SemanticSearchHits.empty();
+        }
+        if (!embeddingProvider.configured()) {
+            throw new BusinessException(embeddingProvider.statusMessage());
+        }
+        VectorIndexMetadata metadata = readMetadata();
+        if (!metadata.available() || metadata.indexedCount() == 0) {
+            return SemanticSearchHits.empty();
+        }
+        float[] queryVector = embeddingProvider.embed(buildEmbeddingText(note));
+        validateQueryDimension(metadata, queryVector);
+        try (Directory directory = openDirectory();
+             DirectoryReader reader = DirectoryReader.open(directory)) {
+            IndexSearcher searcher = new IndexSearcher(reader);
+            int candidateCount = Math.min(metadata.indexedCount(), normalizeCandidateLimit(maxCandidates));
+            KnnFloatVectorQuery vectorQuery = new KnnFloatVectorQuery(VectorIndexFields.VECTOR, queryVector, candidateCount);
+            TopDocs topDocs = searcher.search(vectorQuery, candidateCount);
+            List<SemanticHit> hits = collectSemanticHits(searcher, topDocs.scoreDocs).stream()
+                    .filter(hit -> !note.getId().equals(hit.noteId()))
+                    .toList();
+            return new SemanticSearchHits(hits, hits.size());
+        } catch (IOException ex) {
+            throw new BusinessException("查询相似向量失败：" + ex.getMessage());
+        }
     }
 
     /**
@@ -538,6 +632,34 @@ public class VectorIndexService {
             ));
         }
         return hits;
+    }
+
+    /**
+     * 收集当前向量索引中的笔记ID。
+     *
+     * @param directory 索引目录
+     * @return 笔记ID列表
+     * @throws IOException 读取异常
+     */
+    private List<String> collectIndexedNoteIds(Directory directory) throws IOException {
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            List<String> noteIds = new ArrayList<>();
+            for (LeafReaderContext context : reader.leaves()) {
+                LeafReader leafReader = context.reader();
+                Bits liveDocs = leafReader.getLiveDocs();
+                for (int docId = 0; docId < leafReader.maxDoc(); docId++) {
+                    if (liveDocs != null && !liveDocs.get(docId)) {
+                        continue;
+                    }
+                    var document = leafReader.document(docId);
+                    String noteId = safeText(document.get(VectorIndexFields.ID));
+                    if (!noteId.isBlank()) {
+                        noteIds.add(noteId);
+                    }
+                }
+            }
+            return noteIds;
+        }
     }
 
     /**

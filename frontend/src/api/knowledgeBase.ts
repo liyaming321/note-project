@@ -1,7 +1,9 @@
 import { httpClient, unwrapData } from './client'
 
 import type {
+  AdminIndexHealth,
   AdminReindexResult,
+  AdminVectorCleanupResult,
   AdminVectorIndexInfo,
   AdminVectorReindexResult,
   AdminWorkspaceInfo,
@@ -16,6 +18,10 @@ import type {
   MarkdownImportResult,
   ImageUploadResult,
   EmbeddingProviderInfo,
+  KnowledgeQaPayload,
+  KnowledgeQaResult,
+  LinkImportPayload,
+  LinkImportPreview,
   NoteListItem,
   NotePayload,
   NoteQuery,
@@ -23,6 +29,7 @@ import type {
   PageResponse,
   SearchQuery,
   SearchResult,
+  SimilarNote,
   Tag
 } from '@/types/api'
 
@@ -118,6 +125,12 @@ export function importBookmarks(file: File) {
   }))
 }
 
+export function importLink(payload: LinkImportPayload) {
+  return unwrapData<LinkImportPreview>(httpClient.post('/import/link', payload, {
+    timeout: 120000
+  }))
+}
+
 export async function exportBackup() {
   const response = await httpClient.get('/admin/backup', {
     responseType: 'blob',
@@ -154,6 +167,18 @@ export function searchNotes(query: SearchQuery = {}) {
       ...params,
       mode: searchMode
     }
+  }))
+}
+
+export function askKnowledgeBase(payload: KnowledgeQaPayload) {
+  return unwrapData<KnowledgeQaResult>(httpClient.post('/knowledge-qa', payload, {
+    timeout: 120000
+  }))
+}
+
+export function fetchSimilarNotes(noteId: number, limit = 6) {
+  return unwrapData<SimilarNote[]>(httpClient.get(`/notes/${noteId}/similar`, {
+    params: { limit }
   }))
 }
 
@@ -201,6 +226,14 @@ export function rebuildVectorIndex() {
   return unwrapData<AdminVectorReindexResult>(httpClient.post('/admin/vector-index/rebuild', undefined, {
     timeout: 300000
   }))
+}
+
+export function fetchIndexHealth() {
+  return unwrapData<AdminIndexHealth>(httpClient.get('/admin/index-health'))
+}
+
+export function cleanupVectorIndex() {
+  return unwrapData<AdminVectorCleanupResult>(httpClient.post('/admin/vector-index/cleanup'))
 }
 
 function downloadBlob(blob: Blob, fileName: string) {

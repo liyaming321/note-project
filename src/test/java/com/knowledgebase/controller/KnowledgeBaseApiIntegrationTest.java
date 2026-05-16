@@ -397,6 +397,90 @@ class KnowledgeBaseApiIntegrationTest {
     }
 
     /**
+     * 验证 RAG 问答、相似笔记和索引运维接口。
+     *
+     * @throws Exception 请求执行异常
+     */
+    @Test
+    void shouldSupportStageSevenDiscoveryAndMaintenanceApis() throws Exception {
+        MvcResult categoryResult = mockMvc.perform(post("/api/categories")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of("name", "第七阶段发现分类"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long categoryId = readDataId(categoryResult);
+        long sourceNoteId = createTestNote(
+                "RAG 混合搜索说明",
+                "RAG 会先使用混合搜索召回相关笔记，再调用 LLM 生成带引用的回答。",
+                List.of("stage-seven", "rag")
+        );
+        long similarNoteId = createTestNote(
+                "月亮火车备忘",
+                "蓝莓、火车和月亮是完全不同主题的个人备忘。",
+                List.of("stage-seven", "rag")
+        );
+
+        mockMvc.perform(put("/api/notes/{id}", sourceNoteId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "title", "RAG 混合搜索说明",
+                                "content", "RAG 会先使用混合搜索召回相关笔记，再调用 LLM 生成带引用的回答。",
+                                "type", "MARKDOWN",
+                                "categoryId", categoryId,
+                                "tags", List.of("stage-seven", "rag")
+                        ))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/notes/{id}", similarNoteId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "title", "月亮火车备忘",
+                                "content", "蓝莓、火车和月亮是完全不同主题的个人备忘。",
+                                "type", "MARKDOWN",
+                                "categoryId", categoryId,
+                                "tags", List.of("stage-seven", "rag")
+                        ))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/reindex"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/knowledge-qa")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "question", "RAG 问答如何返回引用？",
+                                "provider", "deepseek",
+                                "topK", 3,
+                                "tag", "stage-seven"
+                        ))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("deepseek")))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("API Key")));
+
+        mockMvc.perform(get("/api/notes/{id}/similar", sourceNoteId)
+                        .param("limit", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value((int) similarNoteId))
+                .andExpect(jsonPath("$.data[0].reason").value(org.hamcrest.Matchers.containsString("标签")))
+                .andExpect(jsonPath("$.data[0].source").value("metadata"));
+
+        mockMvc.perform(get("/api/admin/index-health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.databaseActiveCount").value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)))
+                .andExpect(jsonPath("$.data.searchIndexedCount").value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)))
+                .andExpect(jsonPath("$.data.vectorIndexedCount").value(0))
+                .andExpect(jsonPath("$.data.searchHealthy").isBoolean())
+                .andExpect(jsonPath("$.data.vectorHealthy").value(true));
+
+        mockMvc.perform(post("/api/admin/vector-index/cleanup"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.removedCount").value(0))
+                .andExpect(jsonPath("$.data.indexedCount").value(0))
+                .andExpect(jsonPath("$.data.message").value("未发现无效向量"));
+    }
+
+    /**
      * 验证全文搜索、筛选、逻辑删除、恢复和手动重建索引。
      *
      * @throws Exception 请求执行异常

@@ -73,7 +73,6 @@
     <main class="workspace-main-shell">
       <header class="workspace-topbar">
         <div class="topbar-left">
-          <h1>知识库</h1>
           <span class="topbar-helper">{{ isEdit ? '正在编辑笔记' : '正在新建笔记' }}</span>
         </div>
         <div class="topbar-actions">
@@ -282,7 +281,7 @@ import {
   uploadImage
 } from '@/api/knowledgeBase'
 import type { ApiResponse, ImageUploadResult } from '@/types/api'
-import type { Category, LlmProviderInfo, NotePayload, NoteType, Tag } from '@/types/api'
+import type { Category, LinkImportDraft, LlmProviderInfo, NotePayload, NoteType, Tag } from '@/types/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -293,6 +292,8 @@ type CategoryTreeNode = {
   children: CategoryTreeNode[]
 }
 type WorkspaceView = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
+
+const LINK_IMPORT_DRAFT_PREFIX = 'people-wiki-link-import-draft:'
 
 const isEdit = computed(() => Boolean(route.params.id))
 const saving = ref(false)
@@ -381,6 +382,8 @@ onMounted(async () => {
   document.getElementById('editor')?.addEventListener('paste', handlePasteImage, true)
   if (isEdit.value) {
     await loadExistingNote()
+  } else {
+    loadImportedLinkDraft()
   }
 })
 
@@ -411,6 +414,50 @@ async function loadExistingNote() {
   form.favorite = note.favorite
   form.pinned = note.pinned
   editor?.setValue(note.content)
+}
+
+function loadImportedLinkDraft() {
+  const draftId = typeof route.query.draftId === 'string' ? route.query.draftId : ''
+  if (!draftId) {
+    return
+  }
+  const storageKey = `${LINK_IMPORT_DRAFT_PREFIX}${draftId}`
+  const rawDraft = window.localStorage.getItem(storageKey)
+  if (!rawDraft) {
+    message.warning('未找到链接导入草稿，请重新导入')
+    return
+  }
+  try {
+    const draft = JSON.parse(rawDraft) as LinkImportDraft
+    if (!isLinkImportDraft(draft)) {
+      message.warning('链接导入草稿格式异常，请重新导入')
+      return
+    }
+    form.title = draft.title
+    form.content = draft.content
+    form.summary = draft.summary
+    form.type = 'MARKDOWN'
+    form.status = 'PUBLISHED'
+    form.language = 'markdown'
+    form.categoryId = draft.categoryId
+    form.tags = draft.tags
+    editor?.setValue(draft.content)
+    window.localStorage.removeItem(storageKey)
+    message.success('链接内容已生成草稿，请预览后保存')
+  } catch {
+    message.error('读取链接导入草稿失败，请重新导入')
+  }
+}
+
+function isLinkImportDraft(value: unknown): value is LinkImportDraft {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const draft = value as Partial<LinkImportDraft>
+  return typeof draft.title === 'string' &&
+    typeof draft.content === 'string' &&
+    typeof draft.summary === 'string' &&
+    Array.isArray(draft.tags)
 }
 
 async function saveNote() {

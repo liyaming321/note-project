@@ -127,6 +127,27 @@ public class IndexService {
     }
 
     /**
+     * 获取全文索引文档数量。
+     *
+     * @return 文档数量
+     */
+    public synchronized int indexedCount() {
+        if (Files.notExists(indexPath)) {
+            return 0;
+        }
+        try (Directory directory = FSDirectory.open(indexPath)) {
+            if (!DirectoryReader.indexExists(directory)) {
+                return 0;
+            }
+            try (DirectoryReader reader = DirectoryReader.open(directory)) {
+                return reader.numDocs();
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("读取全文索引数量失败：" + ex.getMessage());
+        }
+    }
+
+    /**
      * 获取索引目录。
      *
      * @return 索引目录
