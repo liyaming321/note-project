@@ -200,8 +200,14 @@
             <div class="editor-panel">
               <div class="editor-panel-header">
                 <div>
+                  <span class="editor-eyebrow">写作台</span>
                   <h2>正文编辑区</h2>
                   <p>支持 Markdown、代码块语言、图片粘贴上传和实时预览。</p>
+                </div>
+                <div class="editor-feature-list" aria-label="编辑器能力">
+                  <span>Markdown</span>
+                  <span>图片粘贴</span>
+                  <span>实时预览</span>
                 </div>
               </div>
               <div id="editor" class="editor"></div>
@@ -333,6 +339,7 @@ onMounted(async () => {
   editor = new Vditor('editor', {
     height: 'calc(100vh - 340px)',
     mode: 'ir',
+    placeholder: '从一个标题、一个想法，或一段粘贴的资料开始...',
     cache: {
       enable: false
     },

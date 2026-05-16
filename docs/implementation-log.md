@@ -477,3 +477,11 @@
 - README 补充链接导入入口、API、预览保存流程和隐私提醒；`task.md` 标记任务 7.8 完成。
 - 新增 `LinkImportApiIntegrationTest`，使用本地 `HttpServer` 模拟网页与 OpenAI 兼容 Chat Completions 响应，覆盖生成预览、不直接落库和拒绝 `file://` 链接。
 - 验证：`mvn test` 通过，包含前端构建、后端编译、22 个既有测试和 2 个链接导入测试，共 24 个测试。Vite 仍提示大 chunk，来源为 Vditor / Ant Design Vue 依赖体积，不影响构建结果。
+
+## 2026-05-16 编辑区视觉美化
+
+- 新建 / 编辑笔记页正文编辑区增加“写作台”标签和 Markdown、图片粘贴、实时预览能力提示，让编辑器入口更像独立写作工作台。
+- 为 Vditor 编辑器增加中文 placeholder，并重塑外层卡片、工具栏、编辑画布、焦点态、滚动条和 Markdown 内容样式，降低大面积空白带来的粗糙感。
+- 补强 Vditor 工具栏按钮选择器，兼容按钮本身就是 `.vditor-toolbar__item` 的 DOM 结构，确保 hover 和尺寸样式稳定生效。
+- 移动端下编辑区标题和能力提示改为纵向排列，避免窄屏按钮和说明拥挤。
+- 验证：`cd frontend && npm run build` 通过；浏览器打开 `http://127.0.0.1:5173/notes/new` 检查新建页编辑区，确认新样式、placeholder 和工具栏视觉正常；`mvn -DskipTests process-resources` 通过，并已同步最新前端产物到 `target/classes/static`。Vite 仍提示大 chunk，属于既有依赖体积提示，不影响构建结果。
