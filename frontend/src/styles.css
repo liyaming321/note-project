@@ -268,6 +268,15 @@ button {
 .workspace-main-shell {
   min-height: 100vh;
   margin-left: 256px;
+  transition: margin-left 0.24s ease;
+}
+
+.edit-focus-mode .workspace-sidenav {
+  transform: translateX(-100%);
+}
+
+.edit-focus-mode .workspace-main-shell {
+  margin-left: 0;
 }
 
 .workspace-topbar {
@@ -307,6 +316,35 @@ button {
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
+}
+
+.editor-save-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.editor-save-state.saved {
+  color: #0f766e;
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.editor-save-state.dirty {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fed7aa;
+}
+
+.editor-save-state.saving {
+  color: #0050cb;
+  background: #e6f0ff;
+  border-color: #bfdbfe;
 }
 
 .topbar-search {
@@ -1350,6 +1388,10 @@ button {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.edit-layout.focus-layout {
+  max-width: 1480px;
+}
+
 .settings-page-layout {
   grid-template-columns: 280px minmax(0, 1fr);
 }
@@ -1491,6 +1533,22 @@ button {
 
 .edit-advanced-collapse .ant-collapse-content-box {
   padding: 0 14px 14px !important;
+}
+
+.edit-focus-mode .workspace-canvas {
+  max-width: 1540px;
+}
+
+.edit-focus-mode .edit-layout {
+  margin-top: 10px;
+}
+
+.edit-focus-mode .editor-panel {
+  min-height: calc(100vh - 116px);
+}
+
+.edit-focus-mode .mobile-bottom-nav {
+  display: none;
 }
 
 .editor-panel {
@@ -2160,6 +2218,49 @@ button {
     0 16px 34px rgb(39 76 132 / 9%);
 }
 
+.editor-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.editor-shell.dragging-image .editor {
+  border-color: #0066ff;
+  box-shadow:
+    0 0 0 4px rgb(0 102 255 / 12%),
+    0 18px 36px rgb(39 76 132 / 14%);
+}
+
+.editor-drop-overlay {
+  position: absolute;
+  inset: 12px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: #003f9f;
+  background:
+    radial-gradient(circle at center, rgb(230 240 255 / 92%), rgb(255 255 255 / 86%));
+  border: 2px dashed #6b9cff;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 78%);
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+.editor-drop-overlay .anticon {
+  font-size: 32px;
+}
+
+.editor-drop-overlay strong {
+  font-size: 18px;
+}
+
+.editor-drop-overlay span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .editor:focus-within {
   border-color: #6b9cff;
   box-shadow:
@@ -2274,6 +2375,106 @@ button {
   background: #bfcee4;
   border: 3px solid #f8fbff;
   border-radius: 999px;
+}
+
+.edit-focus-mode .editor,
+.edit-focus-mode .editor .vditor {
+  min-height: calc(100vh - 266px);
+}
+
+.edit-focus-mode .editor .vditor-content {
+  min-height: calc(100vh - 322px);
+}
+
+.editor-status-bar,
+.image-upload-banner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgb(255 255 255 / 76%);
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  box-shadow: 0 8px 22px rgb(39 76 132 / 6%);
+  backdrop-filter: blur(10px);
+}
+
+.editor-stat-group,
+.editor-save-summary,
+.image-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.editor-stat-group span {
+  padding: 4px 9px;
+  color: #44546a;
+  background: #f5f8ff;
+  border: 1px solid #dfe8f7;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.editor-save-summary {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.save-dot {
+  width: 9px;
+  height: 9px;
+  background: #22c55e;
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgb(34 197 94 / 12%);
+}
+
+.save-dot.dirty {
+  background: #f97316;
+  box-shadow: 0 0 0 4px rgb(249 115 22 / 14%);
+}
+
+.save-dot.saving {
+  background: #0066ff;
+  box-shadow: 0 0 0 4px rgb(0 102 255 / 14%);
+}
+
+.image-upload-banner {
+  background: #f4f8ff;
+  border-color: #bdd2f6;
+}
+
+.image-upload-banner.error {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.image-upload-banner div {
+  min-width: 0;
+}
+
+.image-upload-banner strong,
+.image-upload-banner span {
+  display: block;
+}
+
+.image-upload-banner strong {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.image-upload-banner span {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .ant-input,
@@ -2481,6 +2682,8 @@ button {
 
   .llm-summary-panel,
   .llm-summary-actions,
+  .editor-status-bar,
+  .image-upload-banner,
   .editor-panel-header {
     align-items: stretch;
     flex-direction: column;
@@ -2489,6 +2692,20 @@ button {
   .editor-feature-list {
     justify-content: flex-start;
     max-width: none;
+  }
+
+  .editor-panel {
+    padding: 16px;
+  }
+
+  .editor .vditor-toolbar {
+    min-height: 48px;
+    padding: 6px 8px !important;
+  }
+
+  .editor .vditor-reset {
+    padding: 20px !important;
+    font-size: 15px;
   }
 
   .llm-provider-select,

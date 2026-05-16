@@ -1,5 +1,5 @@
 <template>
-  <div class="knowledge-workspace">
+  <div :class="['knowledge-workspace', { 'edit-focus-mode': focusMode }]">
     <aside class="workspace-sidenav">
       <div class="workspace-brand">
         <div class="brand-mark">
@@ -74,6 +74,7 @@
       <header class="workspace-topbar">
         <div class="topbar-left">
           <span class="topbar-helper">{{ isEdit ? '正在编辑笔记' : '正在新建笔记' }}</span>
+          <span :class="['editor-save-state', saveStateClass]">{{ saveStateText }}</span>
         </div>
         <div class="topbar-actions">
           <a-tooltip title="回收站">
@@ -86,6 +87,13 @@
               <SettingOutlined />
             </button>
           </a-tooltip>
+          <a-button size="large" class="focus-mode-button" @click="toggleFocusMode">
+            <template #icon>
+              <FullscreenExitOutlined v-if="focusMode" />
+              <FullscreenOutlined v-else />
+            </template>
+            {{ focusMode ? '退出专注' : '专注写作' }}
+          </a-button>
           <a-button size="large" @click="goBack">返回列表</a-button>
           <a-button type="primary" size="large" :loading="saving" @click="saveNote">
             <template #icon><SaveOutlined /></template>
@@ -96,8 +104,8 @@
 
       <div class="workspace-canvas edit-workspace-canvas">
         <div class="edit-page workspace-edit-page">
-          <section class="edit-layout">
-            <a-form layout="vertical" class="edit-form form-panel">
+          <section :class="['edit-layout', { 'focus-layout': focusMode }]">
+            <a-form v-show="!focusMode" layout="vertical" class="edit-form form-panel">
               <section class="edit-form-section">
                 <div class="edit-section-heading">
                   <span>基础信息</span>
@@ -207,10 +215,51 @@
                 <div class="editor-feature-list" aria-label="编辑器能力">
                   <span>Markdown</span>
                   <span>图片粘贴</span>
+                  <span>拖拽上传</span>
                   <span>实时预览</span>
                 </div>
               </div>
-              <div id="editor" class="editor"></div>
+              <div
+                :class="['editor-shell', { 'dragging-image': imageDragActive }]"
+                @dragover.prevent="handleEditorDragOver"
+                @dragleave="handleEditorDragLeave"
+                @drop.prevent="handleEditorDrop"
+              >
+                <div id="editor" class="editor"></div>
+                <div v-if="imageDragActive" class="editor-drop-overlay">
+                  <PictureOutlined />
+                  <strong>释放图片，插入到正文</strong>
+                  <span>支持 PNG、JPG、GIF、WebP 等图片文件</span>
+                </div>
+              </div>
+              <div class="editor-status-bar">
+                <div class="editor-stat-group" aria-label="正文统计">
+                  <span>{{ editorStats.characters }} 字符</span>
+                  <span>{{ editorStats.lines }} 行</span>
+                  <span>{{ editorStats.images }} 张图片</span>
+                </div>
+                <div class="editor-save-summary">
+                  <span :class="['save-dot', saveStateClass]"></span>
+                  <span>{{ saveStateText }}</span>
+                  <span>{{ lastSavedLabel }}</span>
+                </div>
+              </div>
+              <div v-if="imageUploadState.visible" :class="['image-upload-banner', { error: imageUploadState.error }]">
+                <div>
+                  <strong>{{ imageUploadState.title }}</strong>
+                  <span>{{ imageUploadState.detail }}</span>
+                </div>
+                <div class="image-upload-actions">
+                  <a-button
+                    v-if="imageUploadState.error && imageUploadState.retryFiles.length > 0"
+                    size="small"
+                    @click="retryImageUpload"
+                  >
+                    重试
+                  </a-button>
+                  <a-button size="small" type="text" @click="dismissImageUploadState">关闭</a-button>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -263,7 +312,10 @@ import {
   ClusterOutlined,
   DeleteOutlined,
   FileTextOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   InboxOutlined,
+  PictureOutlined,
   PlusOutlined,
   SaveOutlined,
   SettingOutlined,
@@ -272,7 +324,7 @@ import {
 } from '@ant-design/icons-vue'
 import { Empty, message } from 'ant-design-vue'
 import Vditor from 'vditor'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
@@ -298,6 +350,14 @@ type CategoryTreeNode = {
   children: CategoryTreeNode[]
 }
 type WorkspaceView = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
+type ImageUploadState = {
+  visible: boolean
+  title: string
+  detail: string
+  error: boolean
+  uploading: boolean
+  retryFiles: File[]
+}
 
 const LINK_IMPORT_DRAFT_PREFIX = 'people-wiki-link-import-draft:'
 
@@ -306,6 +366,12 @@ const saving = ref(false)
 const summarizing = ref(false)
 const savingCategory = ref(false)
 const categoryManagerVisible = ref(false)
+const focusMode = ref(false)
+const hasUnsavedChanges = ref(false)
+const hydrationComplete = ref(false)
+const importedDraftLoaded = ref(false)
+const lastSavedAt = ref<Date>()
+const imageDragActive = ref(false)
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
 const llmProviders = ref<LlmProviderInfo[]>([])
@@ -327,11 +393,47 @@ const form = reactive<NotePayload>({
   favorite: false,
   pinned: false
 })
+const imageUploadState = reactive<ImageUploadState>({
+  visible: false,
+  title: '图片上传',
+  detail: '等待选择图片',
+  error: false,
+  uploading: false,
+  retryFiles: []
+})
 let editor: Vditor | undefined
 
 const categoryTreeData = computed(() => toTreeData(categories.value))
 const flatCategories = computed(() => flattenCategories(categories.value))
 const tagOptions = computed(() => tags.value.map((tag: Tag) => ({ value: tag.name, label: tag.name })))
+const editorStats = computed(() => calculateEditorStats(form.content))
+const saveStateClass = computed(() => {
+  if (saving.value) {
+    return 'saving'
+  }
+  return hasUnsavedChanges.value ? 'dirty' : 'saved'
+})
+const saveStateText = computed(() => {
+  if (saving.value) {
+    return '保存中'
+  }
+  if (hasUnsavedChanges.value) {
+    return '有未保存修改'
+  }
+  return lastSavedAt.value ? '已保存' : '等待输入'
+})
+const lastSavedLabel = computed(() => {
+  if (lastSavedAt.value) {
+    return `最近保存 ${formatClockTime(lastSavedAt.value)}`
+  }
+  return isEdit.value ? '已载入历史内容' : '尚未保存'
+})
+
+watch(form, () => {
+  if (hydrationComplete.value) {
+    hasUnsavedChanges.value = true
+  }
+}, { deep: true })
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadTags(), loadLlmProviders()])
@@ -392,6 +494,9 @@ onMounted(async () => {
   } else {
     loadImportedLinkDraft()
   }
+  await nextTick()
+  hasUnsavedChanges.value = importedDraftLoaded.value
+  hydrationComplete.value = true
 })
 
 onBeforeUnmount(() => {
@@ -420,6 +525,7 @@ async function loadExistingNote() {
   form.tags = note.tags.map((tag: Tag) => tag.name)
   form.favorite = note.favorite
   form.pinned = note.pinned
+  lastSavedAt.value = new Date(note.updatedAt)
   editor?.setValue(note.content)
 }
 
@@ -450,6 +556,8 @@ function loadImportedLinkDraft() {
     form.tags = draft.tags
     editor?.setValue(draft.content)
     window.localStorage.removeItem(storageKey)
+    importedDraftLoaded.value = true
+    hasUnsavedChanges.value = true
     message.success('链接内容已生成草稿，请预览后保存')
   } catch {
     message.error('读取链接导入草稿失败，请重新导入')
@@ -490,6 +598,8 @@ async function saveNote() {
     const savedNote = isEdit.value
       ? await updateNote(Number(route.params.id), payload)
       : await createNote(payload)
+    hasUnsavedChanges.value = false
+    lastSavedAt.value = new Date(savedNote.updatedAt)
     message.success('保存成功')
     await router.push(`/notes/${savedNote.id}`)
   } catch (error) {
@@ -543,6 +653,15 @@ async function summarizeWithLlm() {
   } finally {
     summarizing.value = false
   }
+}
+
+/**
+ * 切换专注写作模式。
+ */
+async function toggleFocusMode() {
+  focusMode.value = !focusMode.value
+  await nextTick()
+  window.dispatchEvent(new Event('resize'))
 }
 
 function goBack() {
@@ -607,21 +726,173 @@ function handleSaveShortcut(event: KeyboardEvent) {
 
 async function handlePasteImage(event: Event) {
   const clipboardEvent = event as ClipboardEvent
-  const files = Array.from(clipboardEvent.clipboardData?.files ?? []).filter(file => file.type.startsWith('image/'))
+  const files = extractImageFiles(clipboardEvent.clipboardData?.files)
   if (files.length === 0) {
     return
   }
   clipboardEvent.preventDefault()
   clipboardEvent.stopPropagation()
-  for (const file of files) {
+  await uploadImagesToEditor(files, '粘贴上传')
+}
+
+/**
+ * 标记图片拖拽状态。
+ *
+ * @param event 拖拽事件
+ */
+function handleEditorDragOver(event: DragEvent) {
+  if (!hasImageFile(event.dataTransfer?.items, event.dataTransfer?.files)) {
+    return
+  }
+  event.dataTransfer!.dropEffect = 'copy'
+  imageDragActive.value = true
+}
+
+/**
+ * 离开编辑器拖拽区域时隐藏提示层。
+ *
+ * @param event 拖拽事件
+ */
+function handleEditorDragLeave(event: DragEvent) {
+  const target = event.currentTarget as HTMLElement
+  const relatedTarget = event.relatedTarget as Node | null
+  if (!relatedTarget || !target.contains(relatedTarget)) {
+    imageDragActive.value = false
+  }
+}
+
+/**
+ * 处理图片拖拽上传。
+ *
+ * @param event 拖拽事件
+ */
+async function handleEditorDrop(event: DragEvent) {
+  imageDragActive.value = false
+  const files = extractImageFiles(event.dataTransfer?.files)
+  if (files.length === 0) {
+    message.warning('请拖入图片文件')
+    return
+  }
+  await uploadImagesToEditor(files, '拖拽上传')
+}
+
+/**
+ * 重新上传上次失败的图片。
+ */
+async function retryImageUpload() {
+  if (imageUploadState.retryFiles.length === 0) {
+    return
+  }
+  await uploadImagesToEditor([...imageUploadState.retryFiles], '重试上传')
+}
+
+/**
+ * 关闭图片上传状态提示。
+ */
+function dismissImageUploadState() {
+  imageUploadState.visible = false
+}
+
+/**
+ * 上传图片并插入编辑器。
+ *
+ * @param files 图片文件
+ * @param sourceLabel 上传来源文案
+ */
+async function uploadImagesToEditor(files: File[], sourceLabel: string) {
+  imageUploadState.visible = true
+  imageUploadState.error = false
+  imageUploadState.uploading = true
+  imageUploadState.retryFiles = files
+  for (const [index, file] of files.entries()) {
+    const currentIndex = index + 1
+    imageUploadState.title = `${sourceLabel}图片中`
+    imageUploadState.detail = `${file.name} (${formatFileSize(file.size)})，${currentIndex}/${files.length}`
     try {
       const image = await uploadImage(file)
       editor?.insertValue(`![${image.fileName}](${image.url})\n`)
       form.content = editor?.getValue() ?? form.content
+      hasUnsavedChanges.value = true
     } catch (error) {
+      imageUploadState.error = true
+      imageUploadState.uploading = false
+      imageUploadState.title = '图片上传失败'
+      imageUploadState.detail = `${file.name} 上传失败：${(error as Error).message}`
       message.error((error as Error).message)
+      return
     }
   }
+  imageUploadState.uploading = false
+  imageUploadState.retryFiles = []
+  imageUploadState.title = '图片已插入'
+  imageUploadState.detail = `已插入 ${files.length} 张图片，文件保存在本地图片资源目录`
+}
+
+/**
+ * 判断拖拽内容里是否包含图片。
+ *
+ * @param items 拖拽项目
+ * @param files 文件列表
+ * @return 是否包含图片
+ */
+function hasImageFile(items?: DataTransferItemList | null, files?: FileList | null) {
+  const itemList = Array.from(items ?? [])
+  if (itemList.some(item => item.kind === 'file' && item.type.startsWith('image/'))) {
+    return true
+  }
+  return extractImageFiles(files).length > 0
+}
+
+/**
+ * 从文件列表中过滤图片文件。
+ *
+ * @param fileList 文件列表
+ * @return 图片文件数组
+ */
+function extractImageFiles(fileList?: FileList | null) {
+  return Array.from(fileList ?? []).filter(file => file.type.startsWith('image/'))
+}
+
+/**
+ * 计算编辑器正文统计信息。
+ *
+ * @param content Markdown 正文
+ * @return 统计信息
+ */
+function calculateEditorStats(content: string) {
+  const normalizedContent = content.trim()
+  return {
+    characters: normalizedContent.replace(/\s/g, '').length,
+    lines: normalizedContent ? normalizedContent.split(/\r?\n/).length : 0,
+    images: (content.match(/!\[[^\]]*]\([^)]*\)/g) ?? []).length
+  }
+}
+
+/**
+ * 格式化文件大小。
+ *
+ * @param size 文件字节数
+ * @return 可读文件大小
+ */
+function formatFileSize(size: number) {
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+/**
+ * 格式化本地时间。
+ *
+ * @param value 时间
+ * @return HH:mm:ss
+ */
+function formatClockTime(value: Date) {
+  return value.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
 }
 
 function formatVditorUpload(files: File[], responseText: string) {
