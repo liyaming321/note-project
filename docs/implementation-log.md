@@ -515,3 +515,107 @@
 - README 补充单链接 / 批量链接导入 API、`useLlm` 降级行为、批量结果结构和隐私说明；`task.md` 标记任务 8.2 完成。
 - 新增链接导入集成测试，覆盖批量成功与失败混合结果、关闭 LLM 后纯抓取预览、非法协议拒绝和不直接落库。
 - 验证：`mvn -Dtest=LinkImportApiIntegrationTest test` 通过；`cd frontend && npm run build` 通过；`mvn test` 通过，包含前端构建、后端编译、24 个既有测试和 2 个新增链接导入测试，共 26 个测试。复测时导入链接弹窗 UI 可正常打开并展示批量输入、LLM 开关和隐私提示；当前 8080 旧进程未重启时会对新接口返回 404，需重启后端进程加载最新代码。Vite 仍提示大 chunk，属于既有依赖体积提示，不影响构建结果。
+
+## 2026-05-16 8.3 搜索与问答质量调优
+
+- 新增本地 `SearchTuningService`，将混合搜索关键词、语义、标题命中、标签命中、置顶、收藏和最近更新权重从硬编码迁移到数据目录下的 `search-tuning.json`。
+- 新增搜索反馈接口 `POST /api/search/feedback` 与反馈汇总接口 `GET /api/admin/search-feedback-summary`，反馈写入本地 `search-feedback.json`，不新增数据库表。
+- 混合搜索排序解释补充当前实际使用的基础权重；未配置 Embedding 时继续降级为 100% 全文权重并保留配置提示。
+- 知识库问答请求新增追问上下文、引用笔记筛选和严格模式；前端“问知识库”面板支持指定引用、严格基于引用回答和重新生成。
+- 新增 `StageEightApiIntegrationTest` 覆盖中文短词搜索、搜索反馈、配置化权重、引用筛选、追问上下文和严格模式。
+- 验证：`mvn -Dtest=StageEightApiIntegrationTest test` 通过；`cd frontend && npm run build` 通过。
+
+## 2026-05-16 8.4 知识整理工作流
+
+- 新增 `KnowledgeOrganizeService` 和 `GET /api/admin/organize-candidates`，集中识别草稿、未分类、无标签、缺摘要、链接导入资料和超过 180 天未更新笔记。
+- 整理候选返回待整理原因、建议标签、建议分类和建议摘要；前端首页左侧新增“待整理”视图，设置页新增待整理面板。
+- 新增 `POST /api/admin/organize-candidates/apply`，用于后续批量确认后写回摘要、标签和分类；写回前会保存历史版本并同步全文 / 向量索引。
+- 合并与拆分本轮先落地产品方案说明：合并前保留来源快照，拆分生成新笔记并保留原笔记历史，危险操作需要二次确认与可撤销窗口。
+- 验证：`mvn -Dtest=StageEightApiIntegrationTest test` 覆盖待整理候选；`cd frontend && npm run build` 通过。
+
+## 2026-05-16 8.5 数据安全与可靠性增强
+
+- 备份下载后记录本地备份元数据，包括文件名、大小、创建时间和 SHA-256 校验值。
+- 新增 `GET /api/admin/backup-info`，展示最近备份信息，并检查数据目录、数据库文件、全文索引目录、向量索引目录和图片目录状态。
+- 设置页“备份恢复”面板展示最近备份、文件大小、校验状态和目录健康状态；永久删除等危险操作继续保留二次确认。
+- 启动期备份恢复初始化器同步适配新的 `BackupService` 构造器，保持启动参数恢复能力可用。
+- 本轮未新增或修改 SQL；所有新增状态使用本地 JSON 和运行时目录检查实现。
+- 验证：`mvn -Dtest=StageEightApiIntegrationTest test` 覆盖备份健康与备份元数据；`cd frontend && npm run build` 通过。
+
+## 2026-05-16 8.6 前端性能与可维护性优化
+
+- Vue Router 页面从静态 import 改为路由级懒加载，首页、详情、编辑和设置页分离为独立 chunk。
+- Vditor 及其 CSS 从全局入口移除，改为详情页 Markdown 预览和编辑页初始化时动态加载，降低首页首屏负担。
+- Vite `manualChunks` 拆分 `vendor-vditor`、`vendor-icons`、`vendor-highlight`、`vendor-antd` 和通用 `vendor`。
+- 新增 `frontend/src/types/vditor-css.d.ts`，补齐动态导入 Vditor CSS 的 TypeScript 声明。
+- 结果：首页入口 JS 约 3.22 kB，业务页面独立 chunk，Vditor 约 293 kB 独立延迟加载；Ant Design Vue 仍是最大 chunk，后续如需继续优化可考虑按需注册组件。
+- 验证：`cd frontend && npm run build` 通过；构建仍提示 `vendor-antd` 超过 500 kB，属于全量 Ant Design Vue 插件体积提示，不影响运行。
+
+## 2026-05-16 8.7 配置中心与本地模型引导
+
+- 新增 `ConfigurationCenterService` 和 `GET /api/admin/configuration-checklist`，检查数据目录、全文索引目录、向量索引目录、图片目录、LLM Provider 和本地 Embedding 配置状态。
+- 新增 `POST /api/admin/llm-providers/{provider}/test`，发送极短测试消息验证 LLM Provider 连接，返回模型、结果和最近错误信息。
+- 设置页新增“配置中心”面板，展示离线能力、LLM、Embedding、路径检查和本地 llama.cpp / GGUF 模型配置向导。
+- README 补充按使用场景的配置说明和第八阶段新增 API。
+- 验证：`mvn -Dtest=StageEightApiIntegrationTest test` 覆盖配置清单和 LLM 连接测试；`cd frontend && npm run build` 通过。
+
+## 2026-05-16 8.8 测试、文档与发布收口
+
+- 新增第八阶段集成测试 `StageEightApiIntegrationTest`，覆盖搜索调优、搜索反馈、问答追问与引用筛选、严格模式、LLM 连接测试、待整理候选、配置检查和备份健康。
+- README 更新第八阶段能力说明、隐私说明、配置中心、备份健康、待整理工作流和性能拆包说明。
+- `task.md` 标记 8.3 到 8.8 完成；本轮没有 SQL 结构变更，未追加 `docs/sql-changes.sql`。
+- 验证：`mvn -Dtest=StageEightApiIntegrationTest test` 通过；`cd frontend && npm run build` 通过；`mvn test` 通过，共 29 个测试；`mvn clean package` 通过，单 Jar 已重新生成。
+
+## 2026-05-16 项目定位补充
+
+- README 与 `task.md` 补充项目定位：People Wiki 纯粹用于个人记录日记、笔记和知识沉淀。
+- 明确后续设计原则为方便、简洁、低负担，避免引入不符合个人自用场景的复杂协作、权限、流程或过度配置。
+- 验证：本次仅更新文档定位说明，未修改运行代码，未执行构建或后端测试。
+
+## 2026-05-16 首页侧栏导航图标统一
+
+- 修复首页侧栏“所有笔记”和“最近”模板已使用图标但脚本未导入对应组件的问题。
+- 补齐 `FileTextOutlined` 与 `ClockCircleOutlined` 导入，使“所有笔记 / 最近 / 收藏 / 归档 / 待整理”统一为图标 + 文字形式。
+- 验证：`cd frontend && npm run build` 通过。
+
+## 2026-05-16 标签管理与侧栏收纳优化
+
+- 新增 `DELETE /api/tags/{id}`，删除标签时先从所有关联笔记中移除该标签，再删除标签实体，并同步刷新全文索引；向量索引采用尽力同步，避免本地模型配置影响标签清理。
+- 设置页新增“标签管理”面板，支持查看完整标签列表、按标签筛选和二次确认删除标签；删除标签不会删除任何笔记。
+- 首页、详情页、编辑页和设置页左侧标签云统一限制为 12 个常用标签，当前选中的标签优先展示，超出部分通过“还有 N 个标签”进入标签管理，减少侧栏占用。
+- README 与 `task.md` 补充标签管理和侧栏收纳说明；本轮未新增或修改 SQL。
+- 验证：`mvn -Dtest=KnowledgeBaseApiIntegrationTest#shouldDeleteTagAndDetachFromNotes test` 通过；`mvn -Dtest=KnowledgeBaseApiIntegrationTest#shouldManageNotesCategoriesAndTags,KnowledgeBaseApiIntegrationTest#shouldDeleteTagAndDetachFromNotes test` 通过；`cd frontend && npm run build` 通过。
+
+## 2026-05-17 笔记用途管理
+
+- 新增 `NoteKind` 独立实体、仓库、服务和 `GET/POST/PUT/DELETE /api/note-kinds` 接口，用于管理“日记、灵感、学习、项目、资料、代码片段”等个人用途。
+- 保留 `NoteType` 仅表示内容格式（Markdown / 代码），笔记新增 `noteKind` 关联，创建、更新、列表、详情、精确搜索、语义搜索、混合搜索和相似笔记响应均返回用途。
+- 启动初始化器仅在 `note_kinds` 为空时写入默认类型，避免用户删除或调整后被重复塞回。
+- 删除用途时先清空关联笔记的 `noteKind`，不删除笔记；历史版本新增 `noteKindId` 和 `noteKindName` 快照，避免更新和恢复链路丢失上下文。
+- 前端编辑页增加用途选择，首页筛选区、笔记卡片、详情页和历史版本预览展示用途，设置页新增“用途管理”面板支持新增、重命名、排序、删除和按用途筛选。
+- Markdown 和书签导入链路同步适配新的 `NoteRequest.noteKindId` 参数；未指定用途时保持为空，避免导入流程被强制分类。
+- `docs/sql-changes.sql` 追加 `note_kinds` 表、`notes.note_kind_id`、历史版本用途类型快照字段记录；README 与 `task.md` 同步更新功能说明。
+- 验证：`mvn -Dtest=KnowledgeBaseApiIntegrationTest#shouldManageNoteKindsAndDetachFromNotes test` 通过；`cd frontend && npm run build` 通过；`mvn test` 通过，共 31 个测试。
+- 遗留问题：前端构建仍提示 `vendor-antd` 超过 500 kB，这是既有 Ant Design Vue 全量插件体积提示，不影响运行；如继续优化可考虑组件级按需注册。
+
+## 2026-05-17 用途命名与普通文本内容格式
+
+- 将用户可见的“笔记类型”统一改为“用途”，保留后端 `NoteKind` 类名、接口路径和前端字段名，避免破坏现有 API 兼容性。
+- `NoteType` 新增 `TEXT` 内容格式，内容格式语义调整为 Markdown / 代码 / 普通文本三类；保存时仅 Markdown 做 Markdown 纯文本提取，代码和普通文本按原文生成 `contentText`。
+- LLM 总结提示词将 `type` 说明改为“内容格式”，普通文本和代码按原文送入总结链路，Markdown 仍先提取正文文本。
+- 全文索引和高亮链路明确普通文本不进入代码字段，避免普通文本被代码范围搜索误命中；详情页普通文本使用纯文本渲染，不再通过 Vditor Markdown 预览解释语法。
+- 前端列表、编辑、详情、设置页和 README / `task.md` 同步改为“用途”文案，内容格式下拉增加“普通文本”选项，并新增统一的前端内容格式展示工具。
+- 新增 `KnowledgeBaseApiIntegrationTest#shouldSupportPlainTextContentFormat`，覆盖 `TEXT` 创建、详情返回 `contentText` 原文保存、列表按 `type=TEXT` 筛选。
+- 本轮没有 SQL 结构变更，未追加 `docs/sql-changes.sql`。
+- 验证：`mvn -Dtest=KnowledgeBaseApiIntegrationTest#shouldSupportPlainTextContentFormat test` 通过；`mvn test` 通过，共 32 个测试；`cd frontend && npm run build` 通过。
+- 遗留问题：前端构建仍提示 `vendor-antd` 超过 500 kB，这是既有 Ant Design Vue 全量插件体积提示，不影响运行。
+
+## 2026-05-17 普通文本保存旧库兼容修复
+
+- 问题：本地已有 H2 文件库中的 `notes.type` 列仍是旧枚举 `('CODE', 'MARKDOWN')`，新增内容格式 `TEXT` 后保存会触发 H2 `Value not permitted` 约束错误。
+- 实现过程：在 `NoteSchemaMigrationCustomizer` 启动迁移中新增内容格式列迁移，Hibernate 校验建表前将 `notes.type` 统一改为 `VARCHAR(20)`；`Note` 实体的 `NoteType` 字段显式使用 `SqlTypes.VARCHAR`，避免 H2 后续继续生成枚举列。
+- 测试覆盖：新增 `NoteSchemaMigrationCustomizerTest#shouldMigrateLegacyNoteTypeEnumToVarchar`，模拟旧 H2 ENUM 表结构并验证迁移后可以写入 `TEXT`。
+- SQL 记录：`docs/sql-changes.sql` 追加 `ALTER TABLE notes ALTER COLUMN type VARCHAR(20)` 说明，实际运行由启动迁移自动执行。
+- 验证命令：`mvn -Dtest=NoteSchemaMigrationCustomizerTest test` 通过；`mvn -Dtest=KnowledgeBaseApiIntegrationTest#shouldSupportPlainTextContentFormat test` 通过。
+- 执行结果：旧枚举列迁移后可保存普通文本内容格式，普通文本创建、详情读取和列表筛选链路保持正常。
+- 遗留问题：前端构建仍提示 `vendor-antd` 超过 500 kB，这是既有 Ant Design Vue 全量插件体积提示，不影响本次修复。

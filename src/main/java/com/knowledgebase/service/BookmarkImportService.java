@@ -126,6 +126,7 @@ public class BookmarkImportService {
                     NoteType.MARKDOWN,
                     NoteStatus.PUBLISHED,
                     null,
+                    null,
                     categoryId,
                     tags,
                     false,

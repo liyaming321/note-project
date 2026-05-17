@@ -138,6 +138,169 @@ class KnowledgeBaseApiIntegrationTest {
     }
 
     /**
+     * 验证普通文本内容格式会按原文保存纯文本内容。
+     *
+     * @throws Exception 请求执行异常
+     */
+    @Test
+    void shouldSupportPlainTextContentFormat() throws Exception {
+        String plainText = "第一行普通文本\n# 这一行不是 Markdown 标题\n* 星号也应该按原文保存";
+
+        MvcResult noteResult = mockMvc.perform(post("/api/notes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "title", "普通文本笔记",
+                                "content", plainText,
+                                "type", "TEXT",
+                                "tags", List.of("plain-text-format")
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.type").value("TEXT"))
+                .andExpect(jsonPath("$.data.contentText").value(plainText))
+                .andReturn();
+        long noteId = readDataId(noteResult);
+
+        mockMvc.perform(get("/api/notes/{id}", noteId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").value(plainText))
+                .andExpect(jsonPath("$.data.contentText").value(plainText));
+
+        mockMvc.perform(get("/api/notes")
+                        .param("type", "TEXT")
+                        .param("tag", "plain-text-format"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].type").value("TEXT"));
+    }
+
+    /**
+     * 验证删除标签时会同步移除笔记关联。
+     *
+     * @throws Exception 请求执行异常
+     */
+    @Test
+    void shouldDeleteTagAndDetachFromNotes() throws Exception {
+        MvcResult tagResult = mockMvc.perform(post("/api/tags")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of("name", "delete-me"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long tagId = readDataId(tagResult);
+
+        MvcResult noteResult = mockMvc.perform(post("/api/notes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "title", "带待删标签的笔记",
+                                "content", "删除标签后，这篇笔记应保留但不再带该标签。",
+                                "type", "MARKDOWN",
+                                "tags", List.of("delete-me", "keep-me")
+                        ))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long noteId = readDataId(noteResult);
+
+        mockMvc.perform(delete("/api/tags/{id}", tagId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        mockMvc.perform(get("/api/tags"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].name").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("delete-me"))));
+
+        mockMvc.perform(get("/api/notes/{id}", noteId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tags[*].name").value(org.hamcrest.Matchers.hasItem("keep-me")))
+                .andExpect(jsonPath("$.data.tags[*].name").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("delete-me"))));
+
+        mockMvc.perform(get("/api/notes").param("tag", "delete-me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+
+        mockMvc.perform(get("/api/search")
+                        .param("q", "删除标签")
+                        .param("tag", "delete-me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+    }
+
+    /**
+     * 验证笔记用途类型可以管理、筛选、保存历史快照，并在删除后与笔记脱钩。
+     *
+     * @throws Exception 请求执行异常
+     */
+    @Test
+    void shouldManageNoteKindsAndDetachFromNotes() throws Exception {
+        MvcResult noteKindResult = mockMvc.perform(post("/api/note-kinds")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of("name", "读书测试", "sortOrder", 88))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.name").value("读书测试"))
+                .andExpect(jsonPath("$.data.builtIn").value(false))
+                .andReturn();
+        long noteKindId = readDataId(noteKindResult);
+
+        MvcResult noteResult = mockMvc.perform(post("/api/notes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "title", "带类型的笔记",
+                                "content", "这篇笔记用于验证用途类型管理。",
+                                "type", "MARKDOWN",
+                                "noteKindId", noteKindId,
+                                "tags", List.of("note-kind")
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.noteKind.id").value((int) noteKindId))
+                .andExpect(jsonPath("$.data.noteKind.name").value("读书测试"))
+                .andReturn();
+        long noteId = readDataId(noteResult);
+
+        mockMvc.perform(get("/api/notes")
+                        .param("noteKindId", String.valueOf(noteKindId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value((int) noteId))
+                .andExpect(jsonPath("$.data.items[0].noteKind.name").value("读书测试"));
+
+        mockMvc.perform(put("/api/note-kinds/{id}", noteKindId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of("name", "读书复盘", "sortOrder", 89))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("读书复盘"))
+                .andExpect(jsonPath("$.data.sortOrder").value(89));
+
+        mockMvc.perform(put("/api/notes/{id}", noteId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toJson(Map.of(
+                                "title", "带类型的笔记更新",
+                                "content", "更新后仍然保留用途类型，并保存历史快照。",
+                                "type", "MARKDOWN",
+                                "noteKindId", noteKindId,
+                                "tags", List.of("note-kind", "updated")
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.noteKind.name").value("读书复盘"));
+
+        mockMvc.perform(get("/api/notes/{id}/history/{version}", noteId, 1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.noteKindId").value((int) noteKindId))
+                .andExpect(jsonPath("$.data.noteKindName").value("读书复盘"));
+
+        mockMvc.perform(delete("/api/note-kinds/{id}", noteKindId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        mockMvc.perform(get("/api/notes/{id}", noteId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.noteKind").doesNotExist())
+                .andExpect(jsonPath("$.data.tags[*].name").value(org.hamcrest.Matchers.hasItem("updated")));
+
+        mockMvc.perform(get("/api/notes")
+                        .param("noteKindId", String.valueOf(noteKindId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+    }
+
+    /**
      * 验证参数校验失败时返回错误响应。
      *
      * @throws Exception 请求执行异常

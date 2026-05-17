@@ -2,6 +2,8 @@ package com.knowledgebase.controller;
 
 import com.knowledgebase.KnowledgeBaseApplication;
 import com.knowledgebase.config.KnowledgeBaseProperties;
+import com.knowledgebase.dto.AdminBackupInfoResponse;
+import com.knowledgebase.dto.AdminConfigurationChecklistResponse;
 import com.knowledgebase.dto.AdminReindexResponse;
 import com.knowledgebase.dto.AdminIndexHealthResponse;
 import com.knowledgebase.dto.AdminVectorIndexInfoResponse;
@@ -10,18 +12,35 @@ import com.knowledgebase.dto.AdminVectorReindexResponse;
 import com.knowledgebase.dto.AdminWorkspaceInfoResponse;
 import com.knowledgebase.dto.ApiResponse;
 import com.knowledgebase.dto.EmbeddingProviderResponse;
+import com.knowledgebase.dto.KnowledgeOrganizeCandidateResponse;
+import com.knowledgebase.dto.LlmProviderTestResponse;
+import com.knowledgebase.dto.OrganizeApplyRequest;
+import com.knowledgebase.dto.OrganizeApplyResponse;
+import com.knowledgebase.dto.PageResponse;
+import com.knowledgebase.dto.SearchFeedbackSummaryResponse;
+import com.knowledgebase.dto.SearchTuningSettingsRequest;
+import com.knowledgebase.dto.SearchTuningSettingsResponse;
 import com.knowledgebase.service.BackupService;
+import com.knowledgebase.service.ConfigurationCenterService;
 import com.knowledgebase.service.IndexMaintenanceService;
 import com.knowledgebase.service.IndexService;
+import com.knowledgebase.service.KnowledgeOrganizeService;
+import com.knowledgebase.service.LlmChatService;
+import com.knowledgebase.service.SearchTuningService;
 import com.knowledgebase.service.VectorIndexService;
+import jakarta.validation.Valid;
 import java.nio.file.Paths;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -36,6 +55,10 @@ public class AdminController {
     private final IndexMaintenanceService indexMaintenanceService;
     private final BackupService backupService;
     private final KnowledgeBaseProperties properties;
+    private final SearchTuningService searchTuningService;
+    private final KnowledgeOrganizeService knowledgeOrganizeService;
+    private final ConfigurationCenterService configurationCenterService;
+    private final LlmChatService llmChatService;
 
     /**
      * 创建管理控制器。
@@ -45,19 +68,31 @@ public class AdminController {
      * @param indexMaintenanceService 索引运维服务
      * @param backupService 备份服务
      * @param properties 知识库配置
+     * @param searchTuningService 搜索调优服务
+     * @param knowledgeOrganizeService 知识整理服务
+     * @param configurationCenterService 配置中心服务
+     * @param llmChatService LLM 对话服务
      */
     public AdminController(
             IndexService indexService,
             VectorIndexService vectorIndexService,
             IndexMaintenanceService indexMaintenanceService,
             BackupService backupService,
-            KnowledgeBaseProperties properties
+            KnowledgeBaseProperties properties,
+            SearchTuningService searchTuningService,
+            KnowledgeOrganizeService knowledgeOrganizeService,
+            ConfigurationCenterService configurationCenterService,
+            LlmChatService llmChatService
     ) {
         this.indexService = indexService;
         this.vectorIndexService = vectorIndexService;
         this.indexMaintenanceService = indexMaintenanceService;
         this.backupService = backupService;
         this.properties = properties;
+        this.searchTuningService = searchTuningService;
+        this.knowledgeOrganizeService = knowledgeOrganizeService;
+        this.configurationCenterService = configurationCenterService;
+        this.llmChatService = llmChatService;
     }
 
     /**
@@ -75,6 +110,88 @@ public class AdminController {
                 properties.getHistoryMaxVersions(),
                 applicationVersion()
         ));
+    }
+
+    /**
+     * 获取配置中心检查清单。
+     *
+     * @return 配置中心检查清单
+     */
+    @GetMapping("/configuration-checklist")
+    public ApiResponse<AdminConfigurationChecklistResponse> configurationChecklist() {
+        return ApiResponse.success(configurationCenterService.checklist());
+    }
+
+    /**
+     * 测试 LLM 供应商连接。
+     *
+     * @param provider 供应商
+     * @return 测试结果
+     */
+    @PostMapping("/llm-providers/{provider}/test")
+    public ApiResponse<LlmProviderTestResponse> testLlmProvider(@PathVariable String provider) {
+        return ApiResponse.success(llmChatService.testConnection(provider));
+    }
+
+    /**
+     * 获取搜索调优设置。
+     *
+     * @return 搜索调优设置
+     */
+    @GetMapping("/search-tuning")
+    public ApiResponse<SearchTuningSettingsResponse> searchTuning() {
+        return ApiResponse.success(searchTuningService.currentSettings());
+    }
+
+    /**
+     * 更新搜索调优设置。
+     *
+     * @param request 设置请求
+     * @return 更新后的设置
+     */
+    @PutMapping("/search-tuning")
+    public ApiResponse<SearchTuningSettingsResponse> updateSearchTuning(
+            @Valid @RequestBody SearchTuningSettingsRequest request
+    ) {
+        return ApiResponse.success("搜索调优配置已保存", searchTuningService.updateSettings(request));
+    }
+
+    /**
+     * 获取搜索反馈汇总。
+     *
+     * @return 搜索反馈汇总
+     */
+    @GetMapping("/search-feedback-summary")
+    public ApiResponse<SearchFeedbackSummaryResponse> searchFeedbackSummary() {
+        return ApiResponse.success(searchTuningService.feedbackSummary());
+    }
+
+    /**
+     * 查询待整理候选笔记。
+     *
+     * @param page 页码
+     * @param size 每页数量
+     * @return 待整理候选分页
+     */
+    @GetMapping("/organize-candidates")
+    public ApiResponse<PageResponse<KnowledgeOrganizeCandidateResponse>> organizeCandidates(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ApiResponse.success(knowledgeOrganizeService.candidates(page, size));
+    }
+
+    /**
+     * 应用人工确认后的整理结果。
+     *
+     * @param request 整理应用请求
+     * @return 应用结果
+     */
+    @PostMapping("/organize-candidates/apply")
+    public ApiResponse<OrganizeApplyResponse> applyOrganizeCandidates(
+            @Valid @RequestBody OrganizeApplyRequest request
+    ) {
+        return ApiResponse.success("整理结果已应用", knowledgeOrganizeService.apply(request));
     }
 
     /**
@@ -156,6 +273,16 @@ public class AdminController {
                         .toString())
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(backup.content());
+    }
+
+    /**
+     * 获取备份健康信息。
+     *
+     * @return 备份健康信息
+     */
+    @GetMapping("/backup-info")
+    public ApiResponse<AdminBackupInfoResponse> backupInfo() {
+        return ApiResponse.success(backupService.info());
     }
 
     /**

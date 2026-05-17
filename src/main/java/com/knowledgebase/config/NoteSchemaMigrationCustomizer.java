@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 public class NoteSchemaMigrationCustomizer implements HibernatePropertiesCustomizer {
 
     private static final String NOTES_TABLE = "NOTES";
+    private static final String TYPE_COLUMN = "TYPE";
     private static final String STATUS_COLUMN = "STATUS";
     private static final String ARCHIVED_COLUMN = "ARCHIVED";
     private static final String SUMMARY_COLUMN = "SUMMARY";
@@ -50,6 +51,7 @@ public class NoteSchemaMigrationCustomizer implements HibernatePropertiesCustomi
         if (!tableExists(NOTES_TABLE)) {
             return;
         }
+        migrateContentFormatColumn();
         if (!columnExists(NOTES_TABLE, STATUS_COLUMN)) {
             jdbcTemplate.execute("ALTER TABLE notes ADD COLUMN status VARCHAR(20) DEFAULT 'PUBLISHED'");
         }
@@ -61,6 +63,16 @@ public class NoteSchemaMigrationCustomizer implements HibernatePropertiesCustomi
         }
         jdbcTemplate.update("UPDATE notes SET status = 'PUBLISHED' WHERE status IS NULL");
         jdbcTemplate.update("UPDATE notes SET archived = FALSE WHERE archived IS NULL");
+    }
+
+    /**
+     * 将旧 H2 枚举格式迁移为字符串列，避免新增内容格式时被旧枚举约束拦截。
+     */
+    private void migrateContentFormatColumn() {
+        if (!columnExists(NOTES_TABLE, TYPE_COLUMN)) {
+            return;
+        }
+        jdbcTemplate.execute("ALTER TABLE notes ALTER COLUMN type VARCHAR(20)");
     }
 
     /**

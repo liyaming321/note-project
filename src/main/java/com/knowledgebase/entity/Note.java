@@ -20,7 +20,9 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import org.hibernate.annotations.Comment;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 笔记实体。
@@ -54,8 +56,9 @@ public class Note {
     private String summary;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(length = 20)
-    @Comment("笔记类型")
+    @Comment("内容格式")
     private NoteType type;
 
     @Enumerated(EnumType.STRING)
@@ -66,6 +69,11 @@ public class Note {
     @Column(length = 40)
     @Comment("代码语言")
     private String language;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "note_kind_id")
+    @Comment("笔记用途类型")
+    private NoteKind noteKind;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
@@ -125,6 +133,7 @@ public class Note {
      * @param contentText 纯文本内容
      * @param type 类型
      * @param language 代码语言
+     * @param noteKind 笔记用途类型
      * @param category 所属分类
      * @param tags 标签集合
      */
@@ -134,6 +143,7 @@ public class Note {
             String contentText,
             NoteType type,
             String language,
+            NoteKind noteKind,
             Category category,
             Set<Tag> tags
     ) {
@@ -142,6 +152,7 @@ public class Note {
         this.contentText = contentText;
         this.type = type;
         this.language = language;
+        this.noteKind = noteKind;
         this.category = category;
         this.tags = new LinkedHashSet<>(tags);
         this.pinned = false;
@@ -160,6 +171,7 @@ public class Note {
      * @param contentText 纯文本内容
      * @param type 类型
      * @param language 代码语言
+     * @param noteKind 笔记用途类型
      * @param category 所属分类
      * @param tags 标签集合
      */
@@ -170,6 +182,7 @@ public class Note {
             String summary,
             NoteType type,
             String language,
+            NoteKind noteKind,
             Category category,
             Set<Tag> tags
     ) {
@@ -179,6 +192,7 @@ public class Note {
         this.summary = normalizeSummary(summary);
         this.type = type;
         this.language = language;
+        this.noteKind = noteKind;
         this.category = category;
         this.tags.clear();
         this.tags.addAll(tags);
@@ -236,6 +250,15 @@ public class Note {
      */
     public void changeSummary(String summary) {
         this.summary = normalizeSummary(summary);
+    }
+
+    /**
+     * 更新笔记用途类型。
+     *
+     * @param noteKind 笔记用途类型
+     */
+    public void changeNoteKind(NoteKind noteKind) {
+        this.noteKind = noteKind;
     }
 
     /**
@@ -298,9 +321,9 @@ public class Note {
     }
 
     /**
-     * 获取笔记类型。
+     * 获取内容格式。
      *
-     * @return 笔记类型
+     * @return 内容格式
      */
     public NoteType getType() {
         return type;
@@ -322,6 +345,15 @@ public class Note {
      */
     public String getLanguage() {
         return language;
+    }
+
+    /**
+     * 获取笔记用途类型。
+     *
+     * @return 笔记用途类型
+     */
+    public NoteKind getNoteKind() {
+        return noteKind;
     }
 
     /**

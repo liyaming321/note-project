@@ -5,6 +5,7 @@ import com.knowledgebase.dto.PageResponse;
 import com.knowledgebase.dto.SearchResultResponse;
 import com.knowledgebase.entity.Note;
 import com.knowledgebase.entity.NoteStatus;
+import com.knowledgebase.entity.NoteType;
 import com.knowledgebase.entity.SearchScope;
 import com.knowledgebase.exception.BusinessException;
 import com.knowledgebase.repository.NoteRepository;
@@ -430,12 +431,26 @@ public class SearchService {
         return switch (fieldName) {
             case SearchIndexFields.TITLE -> safeText(note.getTitle());
             case SearchIndexFields.CONTENT_PLAIN -> safeText(note.getContentText());
-            case SearchIndexFields.CONTENT_CODE -> note.getType().name().equals("CODE")
-                    ? safeText(note.getContent())
-                    : MarkdownTextExtractor.extractCodeBlocks(note.getContent());
+            case SearchIndexFields.CONTENT_CODE -> codeFieldValue(note);
             case SearchIndexFields.CATEGORY -> note.getCategory() == null ? "" : safeText(note.getCategory().getName());
             default -> "";
         };
+    }
+
+    /**
+     * 获取代码字段内容。
+     *
+     * @param note 笔记实体
+     * @return 代码字段内容
+     */
+    private String codeFieldValue(Note note) {
+        if (note.getType() == NoteType.CODE) {
+            return safeText(note.getContent());
+        }
+        if (note.getType() == NoteType.TEXT) {
+            return "";
+        }
+        return MarkdownTextExtractor.extractCodeBlocks(note.getContent());
     }
 
     /**

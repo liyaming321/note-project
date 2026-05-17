@@ -13,6 +13,8 @@ import java.util.List;
  * @param contentText 纯文本内容
  * @param type 类型
  * @param language 语言
+ * @param noteKindId 笔记用途类型ID
+ * @param noteKindName 笔记用途类型名称
  * @param categoryId 分类ID
  * @param categoryName 分类名称
  * @param tags 标签名称列表
@@ -26,6 +28,8 @@ public record NoteHistoryDetailResponse(
         String contentText,
         String type,
         String language,
+        Long noteKindId,
+        String noteKindName,
         Long categoryId,
         String categoryName,
         List<String> tags,

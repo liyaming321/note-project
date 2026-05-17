@@ -105,7 +105,7 @@ class VectorIndexServiceTest {
      * @return 笔记实体
      */
     private Note createNote(Long id, String title, String contentText) {
-        Note note = new Note(title, contentText, contentText, NoteType.MARKDOWN, "", null, new LinkedHashSet<>());
+        Note note = new Note(title, contentText, contentText, NoteType.MARKDOWN, "", null, null, new LinkedHashSet<>());
         setNoteId(note, id);
         return note;
     }

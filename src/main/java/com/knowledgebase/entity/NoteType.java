@@ -1,7 +1,7 @@
 package com.knowledgebase.entity;
 
 /**
- * 笔记内容类型。
+ * 笔记内容格式。
  */
 public enum NoteType {
     /**
@@ -12,5 +12,10 @@ public enum NoteType {
     /**
      * 代码片段。
      */
-    CODE
+    CODE,
+
+    /**
+     * 普通文本。
+     */
+    TEXT
 }

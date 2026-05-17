@@ -29,3 +29,20 @@
 
 -- 2026-05-14：新增笔记摘要字段，用于保存 LLM 或人工维护的摘要，仍由 JPA ddl-auto=update 自动更新。
 -- ALTER TABLE notes ADD COLUMN summary VARCHAR(500) NULL COMMENT 'AI或人工维护的笔记摘要';
+
+-- 2026-05-17：新增可管理的笔记用途类型，仍由 JPA ddl-auto=update 自动建表和补字段。
+-- CREATE TABLE note_kinds (
+--   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '笔记类型ID',
+--   name VARCHAR(80) NOT NULL UNIQUE COMMENT '笔记类型名称',
+--   sort_order BIGINT NOT NULL COMMENT '排序值',
+--   built_in BOOLEAN NOT NULL COMMENT '是否默认内置类型',
+--   created_at TIMESTAMP NOT NULL COMMENT '创建时间',
+--   updated_at TIMESTAMP NOT NULL COMMENT '更新时间'
+-- );
+-- ALTER TABLE notes ADD COLUMN note_kind_id BIGINT NULL COMMENT '笔记用途类型ID';
+-- ALTER TABLE notes ADD CONSTRAINT fk_notes_note_kind FOREIGN KEY (note_kind_id) REFERENCES note_kinds(id);
+-- ALTER TABLE note_histories ADD COLUMN note_kind_id BIGINT NULL COMMENT '历史笔记用途类型ID';
+-- ALTER TABLE note_histories ADD COLUMN note_kind_name VARCHAR(80) NULL COMMENT '历史笔记用途类型名称';
+
+-- 2026-05-17：修复旧 H2 文件库内容格式列仍为枚举导致 TEXT 保存失败，启动迁移会将枚举列转为字符串列。
+-- ALTER TABLE notes ALTER COLUMN type VARCHAR(20) COMMENT '内容格式';

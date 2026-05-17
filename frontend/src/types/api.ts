@@ -1,4 +1,4 @@
-export type NoteType = 'MARKDOWN' | 'CODE'
+export type NoteType = 'MARKDOWN' | 'CODE' | 'TEXT'
 export type NoteStatus = 'DRAFT' | 'PUBLISHED'
 export type SearchScope = 'all' | 'title' | 'code'
 export type SearchMode = 'exact' | 'semantic' | 'hybrid'
@@ -27,6 +27,15 @@ export interface Tag {
   updatedAt?: string
 }
 
+export interface NoteKind {
+  id: number
+  name: string
+  sortOrder: number
+  builtIn: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface Category {
   id: number
   name: string
@@ -49,6 +58,7 @@ export interface NoteListItem {
   type: NoteType
   status: NoteStatus
   language?: string
+  noteKind?: NoteKind
   category?: SimpleCategory
   tags: Tag[]
   pinned: boolean
@@ -80,6 +90,8 @@ export interface NoteHistoryDetail {
   contentText: string
   type: NoteType
   language?: string
+  noteKindId?: number
+  noteKindName?: string
   categoryId?: number
   categoryName?: string
   tags: string[]
@@ -93,6 +105,7 @@ export interface NotePayload {
   type: NoteType
   status?: NoteStatus
   language?: string
+  noteKindId?: number
   categoryId?: number
   tags: string[]
   pinned?: boolean
@@ -103,6 +116,7 @@ export interface NoteQuery {
   page?: number
   size?: number
   categoryId?: number
+  noteKindId?: number
   tag?: string
   type?: NoteType
   status?: NoteStatus
@@ -276,6 +290,111 @@ export interface AdminVectorCleanupResult {
   message: string
 }
 
+export interface SearchTuningSettings {
+  keywordWeight: number
+  semanticWeight: number
+  titleHitBoost: number
+  tagHitBoost: number
+  pinnedBoost: number
+  favoriteBoost: number
+  recentSevenDaysBoost: number
+  recentThirtyDaysBoost: number
+  updatedAt: string
+  configPath: string
+}
+
+export interface SearchFeedbackPayload {
+  noteId: number
+  keyword?: string
+  mode?: SearchMode
+  useful: boolean
+  reason?: string
+}
+
+export interface SearchFeedbackResult {
+  totalCount: number
+  usefulCount: number
+  irrelevantCount: number
+  message: string
+  recordedAt: string
+}
+
+export interface SearchFeedbackItem {
+  noteId: number
+  noteTitle: string
+  keyword: string
+  mode: string
+  useful: boolean
+  reason: string
+  createdAt: string
+}
+
+export interface SearchFeedbackSummary {
+  totalCount: number
+  usefulCount: number
+  irrelevantCount: number
+  recentItems: SearchFeedbackItem[]
+}
+
+export interface KnowledgeOrganizeCandidate {
+  note: NoteListItem
+  reasons: string[]
+  suggestedTags: string[]
+  suggestedCategory: string
+  suggestedSummary: string
+}
+
+export interface OrganizeApplyItem {
+  noteId: number
+  summary?: string
+  tags?: string[]
+  categoryId?: number
+}
+
+export interface OrganizeApplyResult {
+  updatedCount: number
+  notes: NoteListItem[]
+  message: string
+}
+
+export interface AdminBackupInfo {
+  lastBackupFileName: string
+  lastBackupSize: number
+  lastBackupCreatedAt: string
+  lastBackupChecksum: string
+  dataDirectoryReady: boolean
+  databaseFilesPresent: boolean
+  indexDirectoryReady: boolean
+  vectorIndexDirectoryReady: boolean
+  imagesDirectoryReady: boolean
+  healthy: boolean
+  message: string
+}
+
+export interface ConfigCheckItem {
+  key: string
+  label: string
+  configured: boolean
+  status: string
+  detail: string
+}
+
+export interface AdminConfigurationChecklist {
+  items: ConfigCheckItem[]
+  offlineReady: boolean
+  llmReady: boolean
+  embeddingReady: boolean
+  message: string
+}
+
+export interface LlmProviderTestResult {
+  provider: string
+  model: string
+  success: boolean
+  message: string
+  testedAt: string
+}
+
 export interface LlmProviderInfo {
   name: 'bailian' | 'deepseek'
   model: string
@@ -311,6 +430,9 @@ export interface KnowledgeQaPayload {
   status?: NoteStatus
   updatedFrom?: string
   updatedTo?: string
+  conversationContext?: string[]
+  citationNoteIds?: number[]
+  strictMode?: boolean
 }
 
 export interface KnowledgeQaCitation {
@@ -337,6 +459,7 @@ export interface SimilarNote {
   type: NoteType
   status: NoteStatus
   language?: string
+  noteKind?: NoteKind
   category?: SimpleCategory
   tags: Tag[]
   pinned: boolean

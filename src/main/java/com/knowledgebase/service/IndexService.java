@@ -255,6 +255,9 @@ public class IndexService {
         if (note.getType() == NoteType.CODE) {
             return safeText(note.getContent());
         }
+        if (note.getType() == NoteType.TEXT) {
+            return "";
+        }
         return MarkdownTextExtractor.extractCodeBlocks(note.getContent());
     }
 

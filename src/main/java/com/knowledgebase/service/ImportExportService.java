@@ -184,6 +184,7 @@ public class ImportExportService {
                     NoteType.MARKDOWN,
                     NoteStatus.PUBLISHED,
                     document.language(),
+                    null,
                     categoryId,
                     document.tags(),
                     false,

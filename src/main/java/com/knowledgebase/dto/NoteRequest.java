@@ -14,9 +14,10 @@ import java.util.Set;
  * @param title 标题
  * @param content 内容
  * @param summary 摘要
- * @param type 类型
+ * @param type 内容格式
  * @param status 发布状态
  * @param language 代码语言
+ * @param noteKindId 笔记用途类型ID
  * @param categoryId 分类ID
  * @param tags 标签名称集合
  * @param pinned 是否置顶
@@ -33,13 +34,15 @@ public record NoteRequest(
         @Size(max = 500, message = "摘要不能超过500个字符")
         String summary,
 
-        @NotNull(message = "笔记类型不能为空")
+        @NotNull(message = "内容格式不能为空")
         NoteType type,
 
         NoteStatus status,
 
         @Size(max = 40, message = "语言名称不能超过40个字符")
         String language,
+
+        Long noteKindId,
 
         Long categoryId,
 

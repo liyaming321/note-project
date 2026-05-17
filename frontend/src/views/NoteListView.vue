@@ -28,6 +28,10 @@
           <InboxOutlined />
           <span>归档</span>
         </button>
+        <button :class="['nav-item', { active: activeNav === 'organize' }]" type="button" @click="applyNavFilter('organize')">
+          <ClusterOutlined />
+          <span>待整理</span>
+        </button>
 
         <div class="sidenav-section">
           <h3>分类</h3>
@@ -46,10 +50,13 @@
         </div>
 
         <div class="sidenav-section">
-          <h3>标签</h3>
+          <div class="sidenav-section-title">
+            <h3>标签</h3>
+            <button v-if="tags.length > 0" type="button" @click="openSettingsTags">管理</button>
+          </div>
           <div class="sidebar-tag-cloud">
             <button
-              v-for="tag in tags"
+              v-for="tag in visibleSidebarTags"
               :key="tag.id"
               :class="['workspace-chip', { active: sidebarTag === tag.name }]"
               type="button"
@@ -59,6 +66,14 @@
             </button>
             <a-empty v-if="tags.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无标签" />
           </div>
+          <button
+            v-if="hiddenSidebarTagCount > 0"
+            class="sidenav-more-button"
+            type="button"
+            @click="openSettingsTags"
+          >
+            还有 {{ hiddenSidebarTagCount }} 个标签
+          </button>
         </div>
       </nav>
 
@@ -221,6 +236,17 @@
                 @change="executeSearch"
               />
             </label>
+            <label class="filter-control">
+              <span>用途</span>
+              <a-select
+                v-model:value="query.noteKindId"
+                allow-clear
+                show-search
+                placeholder="日记 / 灵感 / 项目"
+                :options="noteKindOptions"
+                @change="loadNotes"
+              />
+            </label>
           </div>
           <div v-if="advancedFiltersOpen" class="advanced-filter-panel">
             <div class="filter-grid secondary">
@@ -236,10 +262,15 @@
                 />
               </label>
               <label class="filter-control">
-                <span>类型</span>
+                <span>内容格式</span>
                 <a-select v-model:value="query.type" allow-clear placeholder="所有格式" @change="loadNotes">
-                  <a-select-option value="MARKDOWN">Markdown</a-select-option>
-                  <a-select-option value="CODE">代码</a-select-option>
+                  <a-select-option
+                    v-for="option in contentFormatOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </a-select-option>
                 </a-select>
               </label>
               <label class="filter-control">
@@ -412,7 +443,8 @@
                 <span :class="['note-status-pill', note.status === 'DRAFT' ? 'draft' : 'published']">
                   {{ note.status === 'DRAFT' ? '草稿' : '已发布' }}
                 </span>
-                <span class="note-type-pill">{{ note.type === 'CODE' ? note.language || '代码' : 'Markdown' }}</span>
+                <span v-if="note.noteKind" class="note-type-pill">{{ note.noteKind.name }}</span>
+                <span class="note-type-pill">{{ resolveContentFormatLabel(note.type, note.language) }}</span>
                 <a-tag
                   v-for="tag in note.tags"
                   :key="tag.id"
@@ -430,6 +462,19 @@
                 >
                   {{ insight }}
                 </span>
+              </div>
+              <div v-if="note.organizeReasons?.length" class="search-insight-row organize">
+                <span
+                  v-for="reason in note.organizeReasons"
+                  :key="reason"
+                  class="search-insight-pill"
+                >
+                  {{ reason }}
+                </span>
+              </div>
+              <div v-if="isSearchMode && !note.deleted" class="search-feedback-row">
+                <a-button size="small" type="link" @click.stop="sendResultFeedback(note, true)">有用</a-button>
+                <a-button size="small" type="link" danger @click.stop="sendResultFeedback(note, false)">不相关</a-button>
               </div>
               <div class="note-card-footer">
                 <span><CalendarOutlined /> {{ formatTime(note.updatedAt) }}</span>
@@ -722,8 +767,20 @@
               <a-select-option :value="5">引用 5 篇</a-select-option>
               <a-select-option :value="8">引用 8 篇</a-select-option>
             </a-select>
+            <a-checkbox v-model:checked="qaStrictMode">严格基于引用</a-checkbox>
             <a-button type="primary" :loading="qaLoading" @click="askCurrentQuestion">提问</a-button>
           </div>
+          <a-select
+            v-model:value="qaCitationNoteIds"
+            mode="multiple"
+            allow-clear
+            class="qa-citation-select"
+            placeholder="可选：仅基于当前结果中的指定笔记回答"
+          >
+            <a-select-option v-for="note in pageData.items" :key="note.id" :value="note.id">
+              {{ note.title }}
+            </a-select-option>
+          </a-select>
           <p class="settings-note">会复用当前搜索筛选条件：{{ buildSearchConditionText() }}</p>
         </div>
         <div class="knowledge-qa-thread">
@@ -735,6 +792,7 @@
               <div class="knowledge-qa-meta">
                 <span>{{ item.result.provider || '未调用模型' }} / {{ item.result.model || '无模型' }}</span>
                 <span>{{ item.result.citations.length }} 个引用</span>
+                <a-button type="link" size="small" :loading="qaLoading" @click="regenerateQaAnswer(item)">重新生成</a-button>
               </div>
               <div v-if="item.result.citations.length > 0" class="knowledge-qa-citations">
                 <button
@@ -765,9 +823,11 @@ import {
   BarChartOutlined,
   BarsOutlined,
   CalendarOutlined,
+  ClockCircleOutlined,
   ClusterOutlined,
   DeleteOutlined,
   EyeOutlined,
+  FileTextOutlined,
   HolderOutlined,
   InboxOutlined,
   PlusOutlined,
@@ -798,7 +858,9 @@ import {
   exportNotesZip,
   fetchCategories,
   fetchLlmProviders,
+  fetchNoteKinds,
   fetchNotes,
+  fetchOrganizeCandidates,
   fetchTags,
   importBookmarks,
   importLink,
@@ -807,6 +869,7 @@ import {
   permanentlyDeleteNote,
   reorderNotes,
   searchNotes,
+  sendSearchFeedback,
   updateCategory
 } from '@/api/knowledgeBase'
 import type {
@@ -816,6 +879,7 @@ import type {
   LinkImportDraft,
   LinkImportPreview,
   LlmProviderInfo,
+  NoteKind,
   NoteListItem,
   NoteQuery,
   NoteStatus,
@@ -826,6 +890,7 @@ import type {
   SearchScope,
   Tag
 } from '@/types/api'
+import { CONTENT_FORMAT_OPTIONS, resolveContentFormatLabel } from '@/utils/noteFormat'
 
 const router = useRouter()
 const route = useRoute()
@@ -844,9 +909,14 @@ type CategoryTreeNumberNode = {
   children: CategoryTreeNumberNode[]
 }
 
-type NoteCardItem = NoteListItem & Partial<SearchResult>
+type NoteCardItem = NoteListItem & Partial<SearchResult> & {
+  organizeReasons?: string[]
+  suggestedTags?: string[]
+  suggestedCategory?: string
+  suggestedSummary?: string
+}
 type ViewMode = 'grid' | 'list'
-type NavFilter = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
+type NavFilter = 'all' | 'recent' | 'favorite' | 'archived' | 'trash' | 'organize'
 type UpdatedRangeMode = 'all' | 'today' | '7d' | '30d' | 'custom'
 type SearchHistoryItem = {
   id: string
@@ -889,6 +959,8 @@ type ImportResultItem = {
 
 const SEARCH_HISTORY_STORAGE_KEY = 'people-wiki-search-history'
 const LINK_IMPORT_DRAFT_PREFIX = 'people-wiki-link-import-draft:'
+const SIDEBAR_TAG_LIMIT = 12
+const contentFormatOptions = CONTENT_FORMAT_OPTIONS
 
 const loading = ref(false)
 const exporting = ref(false)
@@ -897,6 +969,7 @@ const viewMode = ref<ViewMode>('grid')
 const navMode = ref<NavFilter>('all')
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
+const noteKinds = ref<NoteKind[]>([])
 const importInputRef = ref<HTMLInputElement>()
 const bookmarkImportInputRef = ref<HTMLInputElement>()
 const draggingNoteId = ref<number>()
@@ -923,6 +996,8 @@ const qaLoading = ref(false)
 const qaQuestion = ref('')
 const qaProvider = ref<'bailian' | 'deepseek'>('bailian')
 const qaTopK = ref(5)
+const qaStrictMode = ref(true)
+const qaCitationNoteIds = ref<number[]>([])
 const qaThread = ref<KnowledgeQaThreadItem[]>([])
 const llmProviders = ref<LlmProviderInfo[]>([])
 const searchHistory = ref<SearchHistoryItem[]>([])
@@ -966,7 +1041,16 @@ const sidebarTag = ref<string>()
 const categoryTreeData = computed(() => toTreeData(categories.value))
 const categoryTreeDataForNumber = computed(() => toTreeNumberData(categories.value))
 const flatCategories = computed(() => flattenCategories(categories.value))
+const visibleSidebarTags = computed(() => {
+  if (sidebarTag.value && !tags.value.slice(0, SIDEBAR_TAG_LIMIT).some(tag => tag.name === sidebarTag.value)) {
+    const activeTag = tags.value.find(tag => tag.name === sidebarTag.value)
+    return activeTag ? [activeTag, ...tags.value.filter(tag => tag.id !== activeTag.id).slice(0, SIDEBAR_TAG_LIMIT - 1)] : tags.value.slice(0, SIDEBAR_TAG_LIMIT)
+  }
+  return tags.value.slice(0, SIDEBAR_TAG_LIMIT)
+})
+const hiddenSidebarTagCount = computed(() => Math.max(tags.value.length - visibleSidebarTags.value.length, 0))
 const tagOptions = computed(() => tags.value.map((tag: Tag) => ({ value: tag.name, label: tag.name })))
+const noteKindOptions = computed(() => noteKinds.value.map((noteKind: NoteKind) => ({ value: noteKind.id, label: noteKind.name })))
 const languageOptions = computed(() =>
   [
     'java',
@@ -986,7 +1070,7 @@ const isSearchMode = computed(() => {
     Boolean(searchForm.tag || searchForm.category || searchForm.language)
   )
 })
-const canDragSort = computed(() => !isSearchMode.value && !query.includeDeleted)
+const canDragSort = computed(() => !isSearchMode.value && activeNav.value !== 'organize' && !query.includeDeleted)
 const activeNav = computed<NavFilter>(() => {
   if (query.onlyDeleted) {
     return 'trash'
@@ -1012,6 +1096,9 @@ const currentViewTitle = computed(() => {
   if (activeNav.value === 'trash') {
     return '回收站'
   }
+  if (activeNav.value === 'organize') {
+    return '待整理'
+  }
   return isSearchMode.value ? '搜索结果' : '所有笔记'
 })
 const activeFilterSummaries = computed(() => {
@@ -1033,8 +1120,12 @@ const activeFilterSummaries = computed(() => {
   if (searchForm.language) {
     summaries.push(`语言：${searchForm.language}`)
   }
+  if (query.noteKindId) {
+    const noteKind = noteKinds.value.find(item => item.id === query.noteKindId)
+    summaries.push(`用途：${noteKind?.name || query.noteKindId}`)
+  }
   if (query.type) {
-    summaries.push(`类型：${query.type === 'CODE' ? '代码' : 'Markdown'}`)
+    summaries.push(`内容格式：${resolveContentFormatLabel(query.type)}`)
   }
   if (selectedStatus.value) {
     summaries.push(`状态：${selectedStatus.value === 'DRAFT' ? '草稿' : '已发布'}`)
@@ -1084,7 +1175,7 @@ const successfulLinkResults = computed(() => linkImportResults.value.filter(item
 onMounted(async () => {
   loadSearchHistory()
   syncQueryFromRoute()
-  await Promise.all([loadCategories(), loadTags(), loadLlmProviders(), loadNotes()])
+  await Promise.all([loadCategories(), loadTags(), loadNoteKinds(), loadLlmProviders(), loadNotes()])
 })
 
 watch(
@@ -1119,6 +1210,20 @@ async function loadNotes() {
       pageData.value = (await searchNotes(searchQuery)) as PageResponse<NoteCardItem>
       return
     }
+    if (activeNav.value === 'organize') {
+      const organizePage = await fetchOrganizeCandidates(query.page, query.size)
+      pageData.value = {
+        ...organizePage,
+        items: organizePage.items.map(candidate => ({
+          ...candidate.note,
+          organizeReasons: candidate.reasons,
+          suggestedTags: candidate.suggestedTags,
+          suggestedCategory: candidate.suggestedCategory,
+          suggestedSummary: candidate.suggestedSummary
+        }))
+      }
+      return
+    }
     pageData.value = (await fetchNotes({
       ...query,
       favorite: query.favorite || undefined,
@@ -1143,6 +1248,10 @@ async function loadCategories() {
 
 async function loadTags() {
   tags.value = await fetchTags()
+}
+
+async function loadNoteKinds() {
+  noteKinds.value = await fetchNoteKinds()
 }
 
 async function loadLlmProviders() {
@@ -1202,6 +1311,7 @@ async function executeSearch() {
     return
   }
   query.page = 0
+  query.noteKindId = undefined
   recordSearchHistory()
   await router.replace({
     path: '/',
@@ -1302,6 +1412,21 @@ async function copySearchConditions() {
   }
 }
 
+async function sendResultFeedback(note: NoteCardItem, useful: boolean) {
+  try {
+    const result = await sendSearchFeedback({
+      noteId: note.id,
+      keyword: searchForm.keyword.trim(),
+      mode: searchForm.mode,
+      useful,
+      reason: useful ? '前端标记有用' : '前端标记不相关'
+    })
+    message.success(result.message)
+  } catch (error) {
+    message.error((error as Error).message)
+  }
+}
+
 function openKnowledgeQa() {
   qaVisible.value = true
   if (!qaQuestion.value.trim() && searchForm.keyword.trim()) {
@@ -1317,17 +1442,7 @@ async function askCurrentQuestion() {
   }
   qaLoading.value = true
   try {
-    const result = await askKnowledgeBase({
-      question,
-      provider: qaProvider.value,
-      topK: qaTopK.value,
-      tag: searchForm.tag || query.tag,
-      category: searchForm.category || (query.categoryId ? String(query.categoryId) : undefined),
-      language: searchForm.language,
-      status: selectedStatus.value,
-      updatedFrom: query.updatedFrom,
-      updatedTo: query.updatedTo
-    })
+    const result = await askKnowledgeBase(buildKnowledgeQaPayload(question))
     qaThread.value = [
       { id: `${Date.now()}`, question, result },
       ...qaThread.value
@@ -1343,6 +1458,49 @@ async function askCurrentQuestion() {
   }
 }
 
+async function regenerateQaAnswer(item: KnowledgeQaThreadItem) {
+  if (!item.question.trim()) {
+    return
+  }
+  qaLoading.value = true
+  try {
+    item.result = await askKnowledgeBase(buildKnowledgeQaPayload(item.question))
+    item.error = undefined
+    message.success('已重新生成回答')
+  } catch (error) {
+    item.error = (error as Error).message
+  } finally {
+    qaLoading.value = false
+  }
+}
+
+function buildKnowledgeQaPayload(question: string) {
+  return {
+    question,
+    provider: qaProvider.value,
+    topK: qaTopK.value,
+    tag: searchForm.tag || query.tag,
+    category: searchForm.category || (query.categoryId ? String(query.categoryId) : undefined),
+    language: searchForm.language,
+    status: selectedStatus.value,
+    updatedFrom: query.updatedFrom,
+    updatedTo: query.updatedTo,
+    conversationContext: buildQaConversationContext(),
+    citationNoteIds: qaCitationNoteIds.value,
+    strictMode: qaStrictMode.value
+  }
+}
+
+function buildQaConversationContext() {
+  return qaThread.value
+    .slice(0, 3)
+    .flatMap(item => [
+      `用户追问：${item.question}`,
+      item.result?.answer ? `上一轮回答：${item.result.answer.slice(0, 220)}` : ''
+    ])
+    .filter(Boolean)
+}
+
 async function resetWorkspace() {
   navMode.value = 'all'
   clearSearchState()
@@ -1351,6 +1509,7 @@ async function resetWorkspace() {
   query.sort = 'updatedAt'
   query.direction = 'desc'
   query.categoryId = undefined
+  query.noteKindId = undefined
   query.tag = undefined
   query.type = undefined
   selectedStatus.value = undefined
@@ -1374,6 +1533,7 @@ async function applyNavFilter(filter: NavFilter) {
   query.page = 0
   query.size = 10
   query.categoryId = undefined
+  query.noteKindId = undefined
   query.tag = undefined
   query.type = undefined
   selectedStatus.value = undefined
@@ -1398,7 +1558,7 @@ async function applyNavFilter(filter: NavFilter) {
   if (filter === 'trash') {
     query.onlyDeleted = true
   }
-  await router.replace({ path: '/', query: {} })
+  await router.replace({ path: '/', query: filter === 'all' ? {} : { view: filter } })
   await loadNotes()
 }
 
@@ -1413,6 +1573,7 @@ function clearSearchState() {
   query.page = 0
   query.tag = undefined
   query.categoryId = undefined
+  query.noteKindId = undefined
 }
 
 async function handleStatusFilterChange(value?: NoteStatus) {
@@ -1870,6 +2031,7 @@ function syncQueryFromRoute() {
   const routeScope = route.query.scope
   const routeTag = route.query.tag
   const routeCategory = route.query.category
+  const routeNoteKindId = route.query.noteKindId
   const routeLanguage = route.query.language
   const routeStatus = route.query.status
   const routeUpdatedFrom = route.query.updatedFrom
@@ -1891,6 +2053,7 @@ function syncQueryFromRoute() {
     query.updatedFrom = typeof routeUpdatedFrom === 'string' ? routeUpdatedFrom : undefined
     query.updatedTo = typeof routeUpdatedTo === 'string' ? routeUpdatedTo : undefined
     query.tag = undefined
+    query.noteKindId = undefined
   } else {
     searchForm.keyword = ''
     searchForm.mode = 'exact'
@@ -1900,6 +2063,7 @@ function syncQueryFromRoute() {
     searchForm.language = undefined
     selectedStatus.value = undefined
     query.tag = typeof routeTag === 'string' ? routeTag.trim() : undefined
+    query.noteKindId = parseOptionalPositiveInteger(routeNoteKindId)
     applyRouteView(routeView)
   }
   sidebarTag.value = typeof routeTag === 'string' ? routeTag.trim() : undefined
@@ -1919,6 +2083,9 @@ function applyRouteView(value: unknown) {
   query.archived = value === 'archived' || undefined
   query.onlyDeleted = value === 'trash' || undefined
   query.includeDeleted = undefined
+  if (value === 'organize') {
+    return
+  }
 }
 
 function buildSearchRouteQuery() {
@@ -2021,7 +2188,9 @@ function buildSearchConditionText() {
     `分类：${snapshot.category ? resolveCategoryLabel(snapshot.category) : '不限'}`,
     `语言：${snapshot.language || '不限'}`,
     `发布状态：${snapshot.status ? (snapshot.status === 'DRAFT' ? '草稿' : '已发布') : '不限'}`,
-    `更新时间：${snapshot.updatedFrom || '不限'} 至 ${snapshot.updatedTo || '不限'}`
+    `更新时间：${snapshot.updatedFrom || '不限'} 至 ${snapshot.updatedTo || '不限'}`,
+    `引用筛选：${qaCitationNoteIds.value.length > 0 ? qaCitationNoteIds.value.join(', ') : '不限'}`,
+    `严格模式：${qaStrictMode.value ? '开启' : '关闭'}`
   ]
   return lines.join('\n')
 }
@@ -2135,7 +2304,7 @@ function isNoteStatus(value: unknown): value is NoteStatus {
 }
 
 function isNavFilter(value: unknown): value is NavFilter {
-  return value === 'all' || value === 'recent' || value === 'favorite' || value === 'archived' || value === 'trash'
+  return value === 'all' || value === 'recent' || value === 'favorite' || value === 'archived' || value === 'trash' || value === 'organize'
 }
 
 function parsePositiveInteger(value: unknown, fallback: number) {
@@ -2144,6 +2313,14 @@ function parsePositiveInteger(value: unknown, fallback: number) {
   }
   const parsedValue = Number.parseInt(value, 10)
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback
+}
+
+function parseOptionalPositiveInteger(value: unknown) {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+  const parsedValue = Number.parseInt(value, 10)
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : undefined
 }
 
 function parseNonNegativeInteger(value: unknown, fallback: number) {
@@ -2306,6 +2483,10 @@ async function removeCategory(categoryId: number) {
 
 function openSettings() {
   void router.push('/settings')
+}
+
+function openSettingsTags() {
+  void router.push({ path: '/settings', query: { panel: 'tags' } })
 }
 
 function toDateText(date: Date) {

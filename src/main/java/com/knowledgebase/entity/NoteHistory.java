@@ -55,12 +55,20 @@ public class NoteHistory {
     private String contentText;
 
     @Column(nullable = false, length = 20)
-    @Comment("历史笔记类型")
+    @Comment("历史内容格式")
     private String type;
 
     @Column(length = 40)
     @Comment("历史代码语言")
     private String language;
+
+    @Column(name = "note_kind_id")
+    @Comment("历史笔记用途类型ID")
+    private Long noteKindId;
+
+    @Column(name = "note_kind_name", length = 80)
+    @Comment("历史笔记用途类型名称")
+    private String noteKindName;
 
     @Column(name = "category_id")
     @Comment("历史分类ID")
@@ -94,8 +102,10 @@ public class NoteHistory {
      * @param title 标题
      * @param content 内容
      * @param contentText 纯文本内容
-     * @param type 笔记类型
+     * @param type 内容格式
      * @param language 代码语言
+     * @param noteKindId 笔记用途类型ID
+     * @param noteKindName 笔记用途类型名称
      * @param categoryId 分类ID
      * @param categoryName 分类名称
      * @param tagNamesJson 标签名称JSON
@@ -108,6 +118,8 @@ public class NoteHistory {
             String contentText,
             String type,
             String language,
+            Long noteKindId,
+            String noteKindName,
             Long categoryId,
             String categoryName,
             String tagNamesJson
@@ -119,6 +131,8 @@ public class NoteHistory {
         this.contentText = contentText;
         this.type = type;
         this.language = language;
+        this.noteKindId = noteKindId;
+        this.noteKindName = noteKindName;
         this.categoryId = categoryId;
         this.categoryName = categoryName;
         this.tagNamesJson = tagNamesJson;
@@ -194,6 +208,24 @@ public class NoteHistory {
      */
     public String getLanguage() {
         return language;
+    }
+
+    /**
+     * 获取历史笔记用途类型ID。
+     *
+     * @return 笔记用途类型ID
+     */
+    public Long getNoteKindId() {
+        return noteKindId;
+    }
+
+    /**
+     * 获取历史笔记用途类型名称。
+     *
+     * @return 笔记用途类型名称
+     */
+    public String getNoteKindName() {
+        return noteKindName;
     }
 
     /**

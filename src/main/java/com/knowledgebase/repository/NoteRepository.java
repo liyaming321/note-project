@@ -18,7 +18,7 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
      *
      * @return 未删除笔记列表
      */
-    @EntityGraph(attributePaths = {"category", "tags"})
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
     List<Note> findByDeletedFalse();
 
     /**
@@ -26,7 +26,7 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
      *
      * @return 未删除未归档笔记列表
      */
-    @EntityGraph(attributePaths = {"category", "tags"})
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
     List<Note> findByDeletedFalseAndArchivedFalse();
 
     /**
@@ -35,7 +35,7 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
      * @param ids 笔记ID集合
      * @return 未删除笔记列表
      */
-    @EntityGraph(attributePaths = {"category", "tags"})
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
     List<Note> findByIdInAndDeletedFalse(Collection<Long> ids);
 
     /**
@@ -44,7 +44,7 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
      * @param ids 笔记ID集合
      * @return 未删除未归档笔记列表
      */
-    @EntityGraph(attributePaths = {"category", "tags"})
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
     List<Note> findByIdInAndDeletedFalseAndArchivedFalse(Collection<Long> ids);
 
     /**
@@ -53,8 +53,26 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
      * @param ids 笔记ID集合
      * @return 笔记列表
      */
-    @EntityGraph(attributePaths = {"category", "tags"})
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
     List<Note> findByIdIn(Collection<Long> ids);
+
+    /**
+     * 查询关联了指定标签的全部笔记。
+     *
+     * @param tagId 标签ID
+     * @return 笔记列表
+     */
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
+    List<Note> findDistinctByTags_Id(Long tagId);
+
+    /**
+     * 查询关联了指定用途的全部笔记。
+     *
+     * @param noteKindId 用途ID
+     * @return 笔记列表
+     */
+    @EntityGraph(attributePaths = {"category", "tags", "noteKind"})
+    List<Note> findDistinctByNoteKindId(Long noteKindId);
 
     /**
      * 判断指定分类下是否存在笔记。
@@ -67,7 +85,7 @@ public interface NoteRepository extends JpaRepository<Note, Long>, JpaSpecificat
     /**
      * 判断指定类型下是否存在未删除笔记。
      *
-     * @param type 笔记类型
+     * @param type 内容格式
      * @param deleted 是否删除
      * @return 是否存在
      */

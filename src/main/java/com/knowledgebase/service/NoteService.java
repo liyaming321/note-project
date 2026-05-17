@@ -12,11 +12,13 @@ import com.knowledgebase.exception.BusinessException;
 import com.knowledgebase.entity.Category;
 import com.knowledgebase.entity.Note;
 import com.knowledgebase.entity.NoteHistory;
+import com.knowledgebase.entity.NoteKind;
 import com.knowledgebase.entity.NoteStatus;
 import com.knowledgebase.entity.NoteType;
 import com.knowledgebase.entity.Tag;
 import com.knowledgebase.exception.ResourceNotFoundException;
 import com.knowledgebase.repository.CategoryRepository;
+import com.knowledgebase.repository.NoteKindRepository;
 import com.knowledgebase.repository.NoteRepository;
 import com.knowledgebase.repository.TagRepository;
 import com.knowledgebase.util.MarkdownTextExtractor;
@@ -54,6 +56,7 @@ public class NoteService {
 
     private final NoteRepository noteRepository;
     private final CategoryRepository categoryRepository;
+    private final NoteKindRepository noteKindRepository;
     private final TagRepository tagRepository;
     private final IndexService indexService;
     private final VectorIndexService vectorIndexService;
@@ -64,6 +67,7 @@ public class NoteService {
      *
      * @param noteRepository 笔记仓库
      * @param categoryRepository 分类仓库
+     * @param noteKindRepository 笔记用途仓库
      * @param tagRepository 标签仓库
      * @param indexService 索引服务
      * @param vectorIndexService 向量索引服务
@@ -72,6 +76,7 @@ public class NoteService {
     public NoteService(
             NoteRepository noteRepository,
             CategoryRepository categoryRepository,
+            NoteKindRepository noteKindRepository,
             TagRepository tagRepository,
             IndexService indexService,
             VectorIndexService vectorIndexService,
@@ -79,6 +84,7 @@ public class NoteService {
     ) {
         this.noteRepository = noteRepository;
         this.categoryRepository = categoryRepository;
+        this.noteKindRepository = noteKindRepository;
         this.tagRepository = tagRepository;
         this.indexService = indexService;
         this.vectorIndexService = vectorIndexService;
@@ -94,13 +100,15 @@ public class NoteService {
     @Transactional
     public NoteDetailResponse create(NoteRequest request) {
         Category category = findCategory(request.categoryId());
+        NoteKind noteKind = findNoteKind(request.noteKindId());
         Set<Tag> tags = resolveTags(request.safeTags());
         Note note = new Note(
                 request.title().trim(),
                 request.content(),
-                MarkdownTextExtractor.extract(request.content()),
+                resolveContentText(request.type(), request.content()),
                 request.type(),
                 normalizeLanguage(request.language()),
+                noteKind,
                 category,
                 tags
         );
@@ -135,14 +143,16 @@ public class NoteService {
         Note note = findNote(id);
         noteHistoryService.saveSnapshot(note);
         Category category = findCategory(request.categoryId());
+        NoteKind noteKind = findNoteKind(request.noteKindId());
         Set<Tag> tags = resolveTags(request.safeTags());
         note.update(
                 request.title().trim(),
                 request.content(),
-                MarkdownTextExtractor.extract(request.content()),
+                resolveContentText(request.type(), request.content()),
                 request.summary(),
                 request.type(),
                 normalizeLanguage(request.language()),
+                noteKind,
                 category,
                 tags
         );
@@ -171,6 +181,7 @@ public class NoteService {
                 null,
                 NoteType.valueOf(history.getType()),
                 normalizeLanguage(history.getLanguage()),
+                note.getNoteKind(),
                 findCategory(noteHistoryService.resolveCategoryId(history)),
                 resolveTags(noteHistoryService.resolveTagNames(history))
         );
@@ -336,6 +347,40 @@ public class NoteService {
     }
 
     /**
+     * 应用人工确认后的元数据整理结果。
+     *
+     * @param id 笔记ID
+     * @param summary 摘要，为 null 时保留原摘要
+     * @param tagNames 标签名称，为 null 时保留原标签
+     * @param categoryId 分类ID，为 null 时保留原分类
+     * @return 更新后的笔记列表响应
+     */
+    @Transactional
+    public NoteListResponse applyMetadata(Long id, String summary, List<String> tagNames, Long categoryId) {
+        Note note = findNote(id);
+        noteHistoryService.saveSnapshot(note);
+        Category category = categoryId == null ? note.getCategory() : findCategory(categoryId);
+        Set<Tag> tags = tagNames == null
+                ? new LinkedHashSet<>(note.getTags())
+                : resolveTags(new LinkedHashSet<>(tagNames));
+        String nextSummary = summary == null ? note.getSummary() : summary;
+        note.update(
+                note.getTitle(),
+                note.getContent(),
+                note.getContentText(),
+                nextSummary,
+                note.getType(),
+                note.getLanguage(),
+                note.getNoteKind(),
+                category,
+                tags
+        );
+        indexService.upsertNote(note);
+        syncVectorIndex(note);
+        return NoteListResponse.from(note);
+    }
+
+    /**
      * 查询笔记历史版本列表。
      *
      * @param id 笔记ID
@@ -365,7 +410,8 @@ public class NoteService {
      *
      * @param categoryId 分类ID
      * @param tag 标签名称
-     * @param type 笔记类型
+     * @param type 内容格式
+     * @param noteKindId 笔记用途类型ID
      * @param status 发布状态
      * @param favorite 是否收藏
      * @param pinned 是否置顶
@@ -385,6 +431,7 @@ public class NoteService {
             Long categoryId,
             String tag,
             NoteType type,
+            Long noteKindId,
             NoteStatus status,
             Boolean favorite,
             Boolean pinned,
@@ -404,7 +451,7 @@ public class NoteService {
                 buildSort(sort, direction)
         );
         return PageResponse.from(noteRepository.findAll(
-                buildSpecification(categoryId, tag, type, status, favorite, pinned, archived, includeDeleted,
+                buildSpecification(categoryId, tag, type, noteKindId, status, favorite, pinned, archived, includeDeleted,
                         onlyDeleted, updatedFrom, updatedTo),
                 pageable
         ).map(NoteListResponse::from));
@@ -433,6 +480,20 @@ public class NoteService {
         }
         return categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new ResourceNotFoundException("分类不存在：" + categoryId));
+    }
+
+    /**
+     * 查询笔记用途类型实体。
+     *
+     * @param noteKindId 笔记用途类型ID
+     * @return 笔记用途类型实体
+     */
+    private NoteKind findNoteKind(Long noteKindId) {
+        if (noteKindId == null) {
+            return null;
+        }
+        return noteKindRepository.findById(noteKindId)
+                .orElseThrow(() -> new ResourceNotFoundException("用途不存在：" + noteKindId));
     }
 
     /**
@@ -499,11 +560,27 @@ public class NoteService {
     }
 
     /**
+     * 根据内容格式生成用于检索和摘要的纯文本。
+     *
+     * @param type 内容格式
+     * @param content 原始内容
+     * @return 纯文本内容
+     */
+    private String resolveContentText(NoteType type, String content) {
+        String safeContent = content == null ? "" : content;
+        if (type == NoteType.MARKDOWN) {
+            return MarkdownTextExtractor.extract(safeContent);
+        }
+        return safeContent;
+    }
+
+    /**
      * 构建列表查询条件。
      *
      * @param categoryId 分类ID
      * @param tag 标签名称
-     * @param type 笔记类型
+     * @param type 内容格式
+     * @param noteKindId 笔记用途类型ID
      * @param status 发布状态
      * @param favorite 是否收藏
      * @param pinned 是否置顶
@@ -518,6 +595,7 @@ public class NoteService {
             Long categoryId,
             String tag,
             NoteType type,
+            Long noteKindId,
             NoteStatus status,
             Boolean favorite,
             Boolean pinned,
@@ -544,6 +622,9 @@ public class NoteService {
             }
             if (type != null) {
                 predicates.add(criteriaBuilder.equal(root.get("type"), type));
+            }
+            if (noteKindId != null) {
+                predicates.add(criteriaBuilder.equal(root.get("noteKind").get("id"), noteKindId));
             }
             if (status != null) {
                 predicates.add(criteriaBuilder.equal(root.get("status"), status));

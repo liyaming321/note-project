@@ -15,9 +15,10 @@ import java.util.List;
  * @param semanticSimilarity 语义相似度
  * @param hybridScore 混合排序得分
  * @param rankExplanation 排序解释
- * @param type 笔记类型
+ * @param type 内容格式
  * @param status 发布状态
  * @param language 代码语言
+ * @param noteKind 笔记用途类型
  * @param category 分类
  * @param tags 标签列表
  * @param pinned 是否置顶
@@ -40,6 +41,7 @@ public record HybridSearchResultResponse(
         String type,
         String status,
         String language,
+        NoteKindResponse noteKind,
         SimpleCategoryResponse category,
         List<TagResponse> tags,
         boolean pinned,
@@ -84,6 +86,7 @@ public record HybridSearchResultResponse(
                 note.getType().name(),
                 note.getStatus().name(),
                 note.getLanguage(),
+                NoteKindResponse.from(note.getNoteKind()),
                 SimpleCategoryResponse.fromNullable(note.getCategory()),
                 note.getTags().stream().map(TagResponse::from).toList(),
                 note.isPinned(),

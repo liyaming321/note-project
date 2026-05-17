@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.knowledgebase.config.KnowledgeBaseProperties;
 import com.knowledgebase.config.KnowledgeBaseProperties.ProviderProperties;
 import com.knowledgebase.dto.LlmProviderResponse;
+import com.knowledgebase.dto.LlmProviderTestResponse;
 import com.knowledgebase.entity.LlmProvider;
 import com.knowledgebase.exception.BusinessException;
 import java.io.IOException;
@@ -13,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +54,40 @@ public class LlmChatService {
                 toProviderResponse(LlmProvider.BAILIAN, providerProperties(LlmProvider.BAILIAN)),
                 toProviderResponse(LlmProvider.DEEPSEEK, providerProperties(LlmProvider.DEEPSEEK))
         );
+    }
+
+    /**
+     * 测试 LLM 供应商连接。
+     *
+     * @param providerValue 供应商
+     * @return 测试结果
+     */
+    public LlmProviderTestResponse testConnection(String providerValue) {
+        LlmProvider provider = resolveProvider(providerValue);
+        ProviderProperties providerProperties = providerProperties(provider);
+        try {
+            LlmChatResult result = chat(
+                    provider.name().toLowerCase(Locale.ROOT),
+                    "你是连接测试助手。",
+                    "请只回复 OK，用于验证连接是否可用。",
+                    0.0D
+            );
+            return new LlmProviderTestResponse(
+                    result.provider(),
+                    result.model(),
+                    true,
+                    "连接成功，模型已返回内容",
+                    LocalDateTime.now()
+            );
+        } catch (BusinessException ex) {
+            return new LlmProviderTestResponse(
+                    provider.name().toLowerCase(Locale.ROOT),
+                    providerProperties == null ? "" : safeText(providerProperties.getModel()),
+                    false,
+                    ex.getMessage(),
+                    LocalDateTime.now()
+            );
+        }
     }
 
     /**

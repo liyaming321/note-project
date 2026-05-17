@@ -15,6 +15,7 @@ import java.util.List;
  * @param type 类型
  * @param status 发布状态
  * @param language 代码语言
+ * @param noteKind 笔记用途类型
  * @param category 分类
  * @param tags 标签列表
  * @param pinned 是否置顶
@@ -33,6 +34,7 @@ public record NoteDetailResponse(
         String type,
         String status,
         String language,
+        NoteKindResponse noteKind,
         SimpleCategoryResponse category,
         List<TagResponse> tags,
         boolean pinned,
@@ -60,6 +62,7 @@ public record NoteDetailResponse(
                 note.getType().name(),
                 note.getStatus().name(),
                 note.getLanguage(),
+                NoteKindResponse.from(note.getNoteKind()),
                 SimpleCategoryResponse.fromNullable(note.getCategory()),
                 note.getTags().stream().map(TagResponse::from).toList(),
                 note.isPinned(),

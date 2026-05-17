@@ -12,7 +12,7 @@ import java.util.List;
  * @param provider LLM 供应商
  * @param title 笔记标题
  * @param content 笔记内容
- * @param type 笔记类型
+ * @param type 内容格式
  * @param language 代码语言
  * @param categoryNames 可选分类名称列表
  */
@@ -25,7 +25,7 @@ public record LlmSummaryRequest(
         @NotBlank(message = "笔记内容不能为空")
         String content,
 
-        @NotNull(message = "笔记类型不能为空")
+        @NotNull(message = "内容格式不能为空")
         NoteType type,
 
         @Size(max = 40, message = "语言名称不能超过40个字符")

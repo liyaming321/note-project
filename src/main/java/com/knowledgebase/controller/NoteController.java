@@ -274,7 +274,8 @@ public class NoteController {
      *
      * @param categoryId 分类ID
      * @param tag 标签名称
-     * @param type 笔记类型
+     * @param type 内容格式
+     * @param noteKindId 笔记用途类型ID
      * @param status 发布状态
      * @param favorite 是否收藏
      * @param pinned 是否置顶
@@ -294,6 +295,7 @@ public class NoteController {
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) NoteType type,
+            @RequestParam(required = false) Long noteKindId,
             @RequestParam(required = false) NoteStatus status,
             @RequestParam(required = false) Boolean favorite,
             @RequestParam(required = false) Boolean pinned,
@@ -311,6 +313,7 @@ public class NoteController {
                 categoryId,
                 tag,
                 type,
+                noteKindId,
                 status,
                 favorite,
                 pinned,

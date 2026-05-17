@@ -13,9 +13,10 @@ import java.util.List;
  * @param similarityScore 相似度分数
  * @param reason 推荐原因
  * @param source 推荐来源
- * @param type 笔记类型
+ * @param type 内容格式
  * @param status 发布状态
  * @param language 代码语言
+ * @param noteKind 笔记用途类型
  * @param category 分类
  * @param tags 标签
  * @param pinned 是否置顶
@@ -32,6 +33,7 @@ public record SimilarNoteResponse(
         String type,
         String status,
         String language,
+        NoteKindResponse noteKind,
         SimpleCategoryResponse category,
         List<TagResponse> tags,
         boolean pinned,
@@ -59,6 +61,7 @@ public record SimilarNoteResponse(
                 note.getType().name(),
                 note.getStatus().name(),
                 note.getLanguage(),
+                NoteKindResponse.from(note.getNoteKind()),
                 SimpleCategoryResponse.fromNullable(note.getCategory()),
                 note.getTags().stream().map(TagResponse::from).toList(),
                 note.isPinned(),

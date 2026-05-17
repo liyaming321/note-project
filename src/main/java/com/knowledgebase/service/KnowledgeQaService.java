@@ -8,9 +8,13 @@ import com.knowledgebase.entity.Note;
 import com.knowledgebase.exception.BusinessException;
 import com.knowledgebase.repository.NoteRepository;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.HtmlUtils;
@@ -67,18 +71,27 @@ public class KnowledgeQaService {
                 request.updatedTo(),
                 request.safeTopK()
         );
-        if (searchResults.isEmpty()) {
+        List<Long> selectedCitationIds = request.safeCitationNoteIds();
+        if (searchResults.isEmpty() && selectedCitationIds.isEmpty()) {
             return new KnowledgeQaResponse("未检索到可引用的笔记，请调整问题或筛选条件后重试。", "", "", List.of());
         }
-        Map<Long, Note> noteMap = loadNotes(searchResults);
+        Map<Long, HybridSearchResultResponse> resultMap = searchResults.stream()
+                .collect(Collectors.toMap(HybridSearchResultResponse::id, Function.identity(), (left, right) -> left));
+        List<Note> notes = selectedCitationIds.isEmpty()
+                ? loadNotes(searchResults)
+                : loadSelectedNotes(selectedCitationIds);
+        if (!selectedCitationIds.isEmpty()) {
+            Set<Long> selectedIdSet = Set.copyOf(selectedCitationIds);
+            notes = notes.stream()
+                    .filter(note -> selectedIdSet.contains(note.getId()))
+                    .sorted(Comparator.comparingInt(note -> selectedCitationIds.indexOf(note.getId())))
+                    .limit(request.safeTopK())
+                    .toList();
+        }
         List<KnowledgeQaCitationResponse> citations = new ArrayList<>();
         List<String> contextBlocks = new ArrayList<>();
-        for (int index = 0; index < searchResults.size(); index++) {
-            HybridSearchResultResponse result = searchResults.get(index);
-            Note note = noteMap.get(result.id());
-            if (note == null) {
-                continue;
-            }
+        for (Note note : notes) {
+            HybridSearchResultResponse result = resultMap.get(note.getId());
             String snippet = citationSnippet(result, note);
             citations.add(KnowledgeQaCitationResponse.from(note, snippet));
             contextBlocks.add("""
@@ -99,8 +112,8 @@ public class KnowledgeQaService {
         }
         LlmChatService.LlmChatResult chatResult = llmChatService.chat(
                 request.provider(),
-                "你是个人知识库问答助手。只能基于给定引用回答；无法从引用中得出时要明确说明。回答必须用中文，并在关键句后标注引用编号，如 [1]。",
-                buildPrompt(question, contextBlocks),
+                systemPrompt(request.strictModeEnabled()),
+                buildPrompt(question, contextBlocks, request.safeConversationContext(), request.strictModeEnabled()),
                 TEMPERATURE
         );
         return new KnowledgeQaResponse(
@@ -117,13 +130,33 @@ public class KnowledgeQaService {
      * @param searchResults 搜索结果
      * @return 笔记映射
      */
-    private Map<Long, Note> loadNotes(List<HybridSearchResultResponse> searchResults) {
+    private List<Note> loadNotes(List<HybridSearchResultResponse> searchResults) {
         List<Long> noteIds = searchResults.stream().map(HybridSearchResultResponse::id).toList();
         Map<Long, Note> noteMap = new LinkedHashMap<>();
         for (Note note : noteRepository.findByIdInAndDeletedFalseAndArchivedFalse(noteIds)) {
             noteMap.put(note.getId(), note);
         }
-        return noteMap;
+        return noteIds.stream()
+                .map(noteMap::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 加载用户指定的引用笔记。
+     *
+     * @param noteIds 笔记ID
+     * @return 笔记列表
+     */
+    private List<Note> loadSelectedNotes(List<Long> noteIds) {
+        Map<Long, Note> noteMap = new LinkedHashMap<>();
+        for (Note note : noteRepository.findByIdInAndDeletedFalseAndArchivedFalse(noteIds)) {
+            noteMap.put(note.getId(), note);
+        }
+        return noteIds.stream()
+                .map(noteMap::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
     }
 
     /**
@@ -133,9 +166,23 @@ public class KnowledgeQaService {
      * @param contextBlocks 上下文
      * @return 提示词
      */
-    private String buildPrompt(String question, List<String> contextBlocks) {
+    private String buildPrompt(
+            String question,
+            List<String> contextBlocks,
+            List<String> conversationContext,
+            boolean strictMode
+    ) {
+        String conversationSection = conversationContext.isEmpty()
+                ? "无"
+                : String.join("\n", conversationContext);
+        String strictRequirement = strictMode
+                ? "严格模式已开启：如果引用中没有直接证据，必须回答“当前引用不足以回答”，不要使用常识补充。"
+                : "可以基于引用做谨慎归纳，但必须说明哪些部分来自引用、哪些部分是建议。";
         return """
                 请回答下面的问题。
+
+                追问上下文：
+                %s
 
                 问题：%s
 
@@ -147,7 +194,21 @@ public class KnowledgeQaService {
                 2. 每个关键结论后标注引用编号，例如 [1]。
                 3. 如果引用不足以回答，请说明缺少哪些信息。
                 4. 回答后附一行“参考来源：”并列出引用编号。
-                """.formatted(question, String.join("\n", contextBlocks));
+                5. %s
+                """.formatted(conversationSection, question, String.join("\n", contextBlocks), strictRequirement);
+    }
+
+    /**
+     * 构建系统提示词。
+     *
+     * @param strictMode 是否严格模式
+     * @return 系统提示词
+     */
+    private String systemPrompt(boolean strictMode) {
+        if (strictMode) {
+            return "你是个人知识库问答助手。只能基于给定引用回答；无法从引用中得出时要明确说明。回答必须用中文，并在关键句后标注引用编号，如 [1]。";
+        }
+        return "你是个人知识库问答助手。优先基于给定引用回答，可以做少量谨慎归纳，但不能编造事实。回答必须用中文，并在关键句后标注引用编号，如 [1]。";
     }
 
     /**
@@ -158,7 +219,7 @@ public class KnowledgeQaService {
      * @return 片段
      */
     private String citationSnippet(HybridSearchResultResponse result, Note note) {
-        String highlight = HtmlUtils.htmlUnescape(safeText(result.highlight()).replaceAll("<[^>]+>", ""));
+        String highlight = result == null ? "" : HtmlUtils.htmlUnescape(safeText(result.highlight()).replaceAll("<[^>]+>", ""));
         if (!highlight.isBlank()) {
             return limitText(highlight, 220);
         }

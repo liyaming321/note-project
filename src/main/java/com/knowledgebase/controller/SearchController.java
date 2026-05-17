@@ -3,15 +3,21 @@ package com.knowledgebase.controller;
 import com.knowledgebase.dto.ApiResponse;
 import com.knowledgebase.dto.HybridSearchResultResponse;
 import com.knowledgebase.dto.PageResponse;
+import com.knowledgebase.dto.SearchFeedbackRequest;
+import com.knowledgebase.dto.SearchFeedbackResponse;
 import com.knowledgebase.dto.SearchResultResponse;
 import com.knowledgebase.dto.SemanticSearchResultResponse;
 import com.knowledgebase.entity.SearchMode;
 import com.knowledgebase.entity.NoteStatus;
 import com.knowledgebase.service.HybridSearchService;
 import com.knowledgebase.service.SearchService;
+import com.knowledgebase.service.SearchTuningService;
 import com.knowledgebase.service.VectorIndexService;
+import jakarta.validation.Valid;
 import java.time.LocalDate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +32,7 @@ public class SearchController {
     private final SearchService searchService;
     private final VectorIndexService vectorIndexService;
     private final HybridSearchService hybridSearchService;
+    private final SearchTuningService searchTuningService;
 
     /**
      * 创建搜索控制器。
@@ -33,15 +40,18 @@ public class SearchController {
      * @param searchService 搜索服务
      * @param vectorIndexService 向量索引服务
      * @param hybridSearchService 混合搜索服务
+     * @param searchTuningService 搜索调优服务
      */
     public SearchController(
             SearchService searchService,
             VectorIndexService vectorIndexService,
-            HybridSearchService hybridSearchService
+            HybridSearchService hybridSearchService,
+            SearchTuningService searchTuningService
     ) {
         this.searchService = searchService;
         this.vectorIndexService = vectorIndexService;
         this.hybridSearchService = hybridSearchService;
+        this.searchTuningService = searchTuningService;
     }
 
     /**
@@ -194,5 +204,16 @@ public class SearchController {
                 page,
                 size
         ));
+    }
+
+    /**
+     * 记录搜索结果反馈。
+     *
+     * @param request 反馈请求
+     * @return 反馈记录结果
+     */
+    @PostMapping("/feedback")
+    public ApiResponse<SearchFeedbackResponse> feedback(@Valid @RequestBody SearchFeedbackRequest request) {
+        return ApiResponse.success("搜索反馈已记录", searchTuningService.recordFeedback(request));
     }
 }

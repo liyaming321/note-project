@@ -1,6 +1,8 @@
 import { httpClient, unwrapData } from './client'
 
 import type {
+  AdminBackupInfo,
+  AdminConfigurationChecklist,
   AdminIndexHealth,
   AdminReindexResult,
   AdminVectorCleanupResult,
@@ -20,17 +22,26 @@ import type {
   MarkdownImportResult,
   ImageUploadResult,
   EmbeddingProviderInfo,
+  KnowledgeOrganizeCandidate,
   KnowledgeQaPayload,
   KnowledgeQaResult,
   LinkImportPayload,
   LinkImportPreview,
+  LlmProviderTestResult,
   NoteListItem,
+  NoteKind,
   NotePayload,
   NoteQuery,
   NoteStatus,
+  OrganizeApplyItem,
+  OrganizeApplyResult,
   PageResponse,
+  SearchFeedbackPayload,
+  SearchFeedbackResult,
+  SearchFeedbackSummary,
   SearchQuery,
   SearchResult,
+  SearchTuningSettings,
   SimilarNote,
   Tag
 } from '@/types/api'
@@ -178,6 +189,10 @@ export function searchNotes(query: SearchQuery = {}) {
   }))
 }
 
+export function sendSearchFeedback(payload: SearchFeedbackPayload) {
+  return unwrapData<SearchFeedbackResult>(httpClient.post('/search/feedback', payload))
+}
+
 export function askKnowledgeBase(payload: KnowledgeQaPayload) {
   return unwrapData<KnowledgeQaResult>(httpClient.post('/knowledge-qa', payload, {
     timeout: 120000
@@ -214,8 +229,38 @@ export function createTag(name: string) {
   return unwrapData<Tag>(httpClient.post('/tags', { name }))
 }
 
+export function deleteTag(id: number) {
+  return unwrapData<void>(httpClient.delete(`/tags/${id}`))
+}
+
+export function fetchNoteKinds() {
+  return unwrapData<NoteKind[]>(httpClient.get('/note-kinds'))
+}
+
+export function createNoteKind(name: string, sortOrder?: number) {
+  return unwrapData<NoteKind>(httpClient.post('/note-kinds', { name, sortOrder }))
+}
+
+export function updateNoteKind(id: number, name: string, sortOrder?: number) {
+  return unwrapData<NoteKind>(httpClient.put(`/note-kinds/${id}`, { name, sortOrder }))
+}
+
+export function deleteNoteKind(id: number) {
+  return unwrapData<void>(httpClient.delete(`/note-kinds/${id}`))
+}
+
 export function fetchWorkspaceInfo() {
   return unwrapData<AdminWorkspaceInfo>(httpClient.get('/admin/workspace'))
+}
+
+export function fetchConfigurationChecklist() {
+  return unwrapData<AdminConfigurationChecklist>(httpClient.get('/admin/configuration-checklist'))
+}
+
+export function testLlmProvider(provider: string) {
+  return unwrapData<LlmProviderTestResult>(httpClient.post(`/admin/llm-providers/${provider}/test`, undefined, {
+    timeout: 90000
+  }))
 }
 
 export function rebuildSearchIndex() {
@@ -242,6 +287,32 @@ export function fetchIndexHealth() {
 
 export function cleanupVectorIndex() {
   return unwrapData<AdminVectorCleanupResult>(httpClient.post('/admin/vector-index/cleanup'))
+}
+
+export function fetchSearchTuning() {
+  return unwrapData<SearchTuningSettings>(httpClient.get('/admin/search-tuning'))
+}
+
+export function updateSearchTuning(payload: Partial<SearchTuningSettings>) {
+  return unwrapData<SearchTuningSettings>(httpClient.put('/admin/search-tuning', payload))
+}
+
+export function fetchSearchFeedbackSummary() {
+  return unwrapData<SearchFeedbackSummary>(httpClient.get('/admin/search-feedback-summary'))
+}
+
+export function fetchOrganizeCandidates(page = 0, size = 20) {
+  return unwrapData<PageResponse<KnowledgeOrganizeCandidate>>(httpClient.get('/admin/organize-candidates', {
+    params: { page, size }
+  }))
+}
+
+export function applyOrganizeCandidates(items: OrganizeApplyItem[]) {
+  return unwrapData<OrganizeApplyResult>(httpClient.post('/admin/organize-candidates/apply', { items }))
+}
+
+export function fetchBackupInfo() {
+  return unwrapData<AdminBackupInfo>(httpClient.get('/admin/backup-info'))
 }
 
 function downloadBlob(blob: Blob, fileName: string) {

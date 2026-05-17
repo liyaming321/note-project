@@ -30,18 +30,11 @@ public class HybridSearchService {
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 50;
     private static final int MAX_CANDIDATES = 10_000;
-    private static final double KEYWORD_WEIGHT = 0.55D;
-    private static final double SEMANTIC_WEIGHT = 0.45D;
-    private static final double TITLE_HIT_BOOST = 0.08D;
-    private static final double TAG_HIT_BOOST = 0.06D;
-    private static final double PINNED_BOOST = 0.04D;
-    private static final double FAVORITE_BOOST = 0.03D;
-    private static final double RECENT_SEVEN_DAYS_BOOST = 0.03D;
-    private static final double RECENT_THIRTY_DAYS_BOOST = 0.015D;
 
     private final SearchService searchService;
     private final VectorIndexService vectorIndexService;
     private final NoteRepository noteRepository;
+    private final SearchTuningService searchTuningService;
 
     /**
      * 创建混合搜索服务。
@@ -49,15 +42,18 @@ public class HybridSearchService {
      * @param searchService 全文搜索服务
      * @param vectorIndexService 向量索引服务
      * @param noteRepository 笔记仓库
+     * @param searchTuningService 搜索调优服务
      */
     public HybridSearchService(
             SearchService searchService,
             VectorIndexService vectorIndexService,
-            NoteRepository noteRepository
+            NoteRepository noteRepository,
+            SearchTuningService searchTuningService
     ) {
         this.searchService = searchService;
         this.vectorIndexService = vectorIndexService;
         this.noteRepository = noteRepository;
+        this.searchTuningService = searchTuningService;
     }
 
     /**
@@ -117,6 +113,7 @@ public class HybridSearchService {
             return emptyPage(safePage, safeSize);
         }
         Map<Long, Note> noteMap = loadNotes(candidates);
+        SearchTuningService.SearchTuningSettings tuningSettings = searchTuningService.settingsValue();
         List<HybridScoredHit> scoredHits = scoreCandidates(
                 candidates,
                 noteMap,
@@ -124,7 +121,8 @@ public class HybridSearchService {
                 tag,
                 keywordHits,
                 semanticResult.semanticAvailable(),
-                semanticResult.fallbackReason()
+                semanticResult.fallbackReason(),
+                tuningSettings
         );
         scoredHits.sort(Comparator.comparingDouble(HybridScoredHit::hybridScore)
                 .reversed()
@@ -284,6 +282,7 @@ public class HybridSearchService {
      * @param keywordHits 关键词候选结果
      * @param semanticAvailable 语义搜索是否可用
      * @param fallbackReason 降级原因
+     * @param tuningSettings 搜索调优设置
      * @return 已评分命中
      */
     private List<HybridScoredHit> scoreCandidates(
@@ -293,7 +292,8 @@ public class HybridSearchService {
             String tag,
             SearchService.KeywordSearchHits keywordHits,
             boolean semanticAvailable,
-            String fallbackReason
+            String fallbackReason,
+            SearchTuningService.SearchTuningSettings tuningSettings
     ) {
         List<HybridScoredHit> scoredHits = new ArrayList<>();
         for (HybridCandidate candidate : candidates) {
@@ -303,12 +303,12 @@ public class HybridSearchService {
             }
             double keywordScore = normalizeKeywordScore(candidate.keywordScore(), keywordHits.maxScore());
             double semanticSimilarity = vectorIndexService.normalizeSimilarity(candidate.semanticScore());
-            ScoreWeights weights = resolveWeights(candidate.hasKeywordHit(), candidate.hasSemanticHit(), semanticAvailable);
-            double titleBoost = titleHit(keyword, note) ? TITLE_HIT_BOOST : 0.0D;
-            double tagBoost = tagHit(keyword, tag, note) ? TAG_HIT_BOOST : 0.0D;
-            double pinnedBoost = note.isPinned() ? PINNED_BOOST : 0.0D;
-            double favoriteBoost = note.isFavorite() ? FAVORITE_BOOST : 0.0D;
-            double recentBoost = recentBoost(note.getUpdatedAt());
+            ScoreWeights weights = resolveWeights(candidate.hasKeywordHit(), candidate.hasSemanticHit(), semanticAvailable, tuningSettings);
+            double titleBoost = titleHit(keyword, note) ? tuningSettings.titleHitBoost() : 0.0D;
+            double tagBoost = tagHit(keyword, tag, note) ? tuningSettings.tagHitBoost() : 0.0D;
+            double pinnedBoost = note.isPinned() ? tuningSettings.pinnedBoost() : 0.0D;
+            double favoriteBoost = note.isFavorite() ? tuningSettings.favoriteBoost() : 0.0D;
+            double recentBoost = recentBoost(note.getUpdatedAt(), tuningSettings);
             double hybridScore = roundScore(
                     keywordScore * weights.keywordWeight()
                             + semanticSimilarity * weights.semanticWeight()
@@ -333,7 +333,8 @@ public class HybridSearchService {
                             favoriteBoost,
                             recentBoost,
                             semanticAvailable,
-                            fallbackReason
+                            fallbackReason,
+                            weights
                     )
             ));
         }
@@ -407,11 +408,17 @@ public class HybridSearchService {
      * @param hasKeywordHit 是否有全文命中
      * @param hasSemanticHit 是否有语义命中
      * @param semanticAvailable 语义搜索是否可用
+     * @param tuningSettings 搜索调优设置
      * @return 分数权重
      */
-    private ScoreWeights resolveWeights(boolean hasKeywordHit, boolean hasSemanticHit, boolean semanticAvailable) {
+    private ScoreWeights resolveWeights(
+            boolean hasKeywordHit,
+            boolean hasSemanticHit,
+            boolean semanticAvailable,
+            SearchTuningService.SearchTuningSettings tuningSettings
+    ) {
         if (hasKeywordHit && hasSemanticHit && semanticAvailable) {
-            return new ScoreWeights(KEYWORD_WEIGHT, SEMANTIC_WEIGHT);
+            return new ScoreWeights(tuningSettings.keywordWeight(), tuningSettings.semanticWeight());
         }
         if (hasSemanticHit && semanticAvailable) {
             return new ScoreWeights(0.0D, 1.0D);
@@ -431,6 +438,7 @@ public class HybridSearchService {
      * @param recentBoost 更新时间加权
      * @param semanticAvailable 语义搜索是否可用
      * @param fallbackReason 降级原因
+     * @param weights 当前使用的基础权重
      * @return 排序解释
      */
     private String explainRank(
@@ -442,14 +450,15 @@ public class HybridSearchService {
             double favoriteBoost,
             double recentBoost,
             boolean semanticAvailable,
-            String fallbackReason
+            String fallbackReason,
+            ScoreWeights weights
     ) {
         List<String> parts = new ArrayList<>();
         if (keywordScore > 0) {
-            parts.add("全文得分 " + formatScore(keywordScore));
+            parts.add("全文得分 " + formatScore(keywordScore) + " × " + formatScore(weights.keywordWeight()));
         }
         if (semanticAvailable && semanticSimilarity > 0) {
-            parts.add("语义相似度 " + formatScore(semanticSimilarity));
+            parts.add("语义相似度 " + formatScore(semanticSimilarity) + " × " + formatScore(weights.semanticWeight()));
         }
         if (titleBoost > 0) {
             parts.add("标题命中加权");
@@ -505,18 +514,19 @@ public class HybridSearchService {
      * 计算最近更新加权。
      *
      * @param updatedAt 更新时间
+     * @param tuningSettings 搜索调优设置
      * @return 最近更新加权
      */
-    private double recentBoost(LocalDateTime updatedAt) {
+    private double recentBoost(LocalDateTime updatedAt, SearchTuningService.SearchTuningSettings tuningSettings) {
         if (updatedAt == null) {
             return 0.0D;
         }
         long days = Duration.between(updatedAt, LocalDateTime.now()).toDays();
         if (days <= 7) {
-            return RECENT_SEVEN_DAYS_BOOST;
+            return tuningSettings.recentSevenDaysBoost();
         }
         if (days <= 30) {
-            return RECENT_THIRTY_DAYS_BOOST;
+            return tuningSettings.recentThirtyDaysBoost();
         }
         return 0.0D;
     }

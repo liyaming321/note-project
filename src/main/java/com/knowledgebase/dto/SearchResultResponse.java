@@ -11,9 +11,10 @@ import java.util.List;
  * @param title 标题
  * @param highlight 高亮片段
  * @param hitFields 命中字段
- * @param type 笔记类型
+ * @param type 内容格式
  * @param status 发布状态
  * @param language 代码语言
+ * @param noteKind 笔记用途类型
  * @param category 分类
  * @param tags 标签列表
  * @param pinned 是否置顶
@@ -31,6 +32,7 @@ public record SearchResultResponse(
         String type,
         String status,
         String language,
+        NoteKindResponse noteKind,
         SimpleCategoryResponse category,
         List<TagResponse> tags,
         boolean pinned,
@@ -59,6 +61,7 @@ public record SearchResultResponse(
                 note.getType().name(),
                 note.getStatus().name(),
                 note.getLanguage(),
+                NoteKindResponse.from(note.getNoteKind()),
                 SimpleCategoryResponse.fromNullable(note.getCategory()),
                 note.getTags().stream().map(TagResponse::from).toList(),
                 note.isPinned(),

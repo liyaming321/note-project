@@ -49,7 +49,7 @@
           <h3>标签</h3>
           <div class="sidebar-tag-cloud">
             <button
-              v-for="tag in tags"
+              v-for="tag in visibleSidebarTags"
               :key="tag.id"
               :class="['workspace-chip', { active: form.tags.includes(tag.name) }]"
               type="button"
@@ -59,6 +59,14 @@
             </button>
             <a-empty v-if="tags.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无标签" />
           </div>
+          <button
+            v-if="hiddenSidebarTagCount > 0"
+            class="sidenav-more-button"
+            type="button"
+            @click="router.push({ path: '/settings', query: { panel: 'tags' } })"
+          >
+            还有 {{ hiddenSidebarTagCount }} 个标签
+          </button>
         </div>
       </nav>
 
@@ -109,12 +117,23 @@
               <section class="edit-form-section">
                 <div class="edit-section-heading">
                   <span>基础信息</span>
-                  <p>标题、分类和标签决定笔记在知识库里的位置。</p>
+                  <p>标题、用途、分类和标签决定笔记在知识库里的位置。</p>
                 </div>
                 <a-row :gutter="[16, 12]">
                   <a-col :xs="24" :lg="12">
                     <a-form-item label="标题" required>
                       <a-input v-model:value="form.title" placeholder="输入笔记标题" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :sm="12" :lg="6">
+                    <a-form-item label="用途">
+                      <a-select
+                        v-model:value="form.noteKindId"
+                        allow-clear
+                        show-search
+                        placeholder="日记 / 灵感 / 项目"
+                        :options="noteKindOptions"
+                      />
                     </a-form-item>
                   </a-col>
                   <a-col :xs="24" :sm="12" :lg="6">
@@ -180,10 +199,15 @@
                 <a-collapse-panel key="advanced" header="更多属性">
                   <a-row :gutter="[16, 12]">
                     <a-col :xs="24" :sm="12" :lg="8">
-                      <a-form-item label="类型" required>
+                      <a-form-item label="内容格式" required>
                         <a-select v-model:value="form.type">
-                          <a-select-option value="MARKDOWN">Markdown</a-select-option>
-                          <a-select-option value="CODE">代码</a-select-option>
+                          <a-select-option
+                            v-for="option in contentFormatOptions"
+                            :key="option.value"
+                            :value="option.value"
+                          >
+                            {{ option.label }}
+                          </a-select-option>
                         </a-select>
                       </a-form-item>
                     </a-col>
@@ -210,12 +234,12 @@
                 <div>
                   <span class="editor-eyebrow">写作台</span>
                   <h2>正文编辑区</h2>
-                  <p>支持 Markdown、代码块语言、图片粘贴上传和实时预览。</p>
+                  <p>支持 Markdown、代码、普通文本、图片粘贴上传和实时预览。</p>
                 </div>
                 <div class="editor-feature-list" aria-label="编辑器能力">
                   <span>Markdown</span>
+                  <span>普通文本</span>
                   <span>图片粘贴</span>
-                  <span>拖拽上传</span>
                   <span>实时预览</span>
                 </div>
               </div>
@@ -323,9 +347,9 @@ import {
   TagsOutlined
 } from '@ant-design/icons-vue'
 import { Empty, message } from 'ant-design-vue'
-import Vditor from 'vditor'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type Vditor from 'vditor'
 
 import {
   createCategory,
@@ -333,13 +357,15 @@ import {
   fetchCategories,
   fetchLlmProviders,
   fetchNote,
+  fetchNoteKinds,
   fetchTags,
   summarizeNoteWithLlm,
   updateNote,
   uploadImage
 } from '@/api/knowledgeBase'
 import type { ApiResponse, ImageUploadResult } from '@/types/api'
-import type { Category, LinkImportDraft, LlmProviderInfo, NotePayload, NoteType, Tag } from '@/types/api'
+import type { Category, LinkImportDraft, LlmProviderInfo, NoteKind, NotePayload, NoteType, Tag } from '@/types/api'
+import { CONTENT_FORMAT_OPTIONS } from '@/utils/noteFormat'
 
 const route = useRoute()
 const router = useRouter()
@@ -360,6 +386,8 @@ type ImageUploadState = {
 }
 
 const LINK_IMPORT_DRAFT_PREFIX = 'people-wiki-link-import-draft:'
+const SIDEBAR_TAG_LIMIT = 12
+const contentFormatOptions = CONTENT_FORMAT_OPTIONS
 
 const isEdit = computed(() => Boolean(route.params.id))
 const saving = ref(false)
@@ -374,6 +402,7 @@ const lastSavedAt = ref<Date>()
 const imageDragActive = ref(false)
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
+const noteKinds = ref<NoteKind[]>([])
 const llmProviders = ref<LlmProviderInfo[]>([])
 const llmProvider = ref<'bailian' | 'deepseek'>('bailian')
 const categoryForm = reactive<{
@@ -402,10 +431,19 @@ const imageUploadState = reactive<ImageUploadState>({
   retryFiles: []
 })
 let editor: Vditor | undefined
+let VditorConstructor: typeof import('vditor')['default'] | undefined
 
 const categoryTreeData = computed(() => toTreeData(categories.value))
 const flatCategories = computed(() => flattenCategories(categories.value))
+const visibleSidebarTags = computed(() => {
+  const selectedTagNames = new Set(form.tags)
+  const selectedTags = tags.value.filter(tag => selectedTagNames.has(tag.name))
+  const remainingTags = tags.value.filter(tag => !selectedTagNames.has(tag.name))
+  return [...selectedTags, ...remainingTags].slice(0, SIDEBAR_TAG_LIMIT)
+})
+const hiddenSidebarTagCount = computed(() => Math.max(tags.value.length - visibleSidebarTags.value.length, 0))
 const tagOptions = computed(() => tags.value.map((tag: Tag) => ({ value: tag.name, label: tag.name })))
+const noteKindOptions = computed(() => noteKinds.value.map((noteKind: NoteKind) => ({ value: noteKind.id, label: noteKind.name })))
 const editorStats = computed(() => calculateEditorStats(form.content))
 const saveStateClass = computed(() => {
   if (saving.value) {
@@ -436,9 +474,10 @@ watch(form, () => {
 }, { deep: true })
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadTags(), loadLlmProviders()])
+  await Promise.all([loadCategories(), loadTags(), loadNoteKinds(), loadLlmProviders()])
   await nextTick()
-  editor = new Vditor('editor', {
+  const VditorClass = await loadVditor()
+  editor = new VditorClass('editor', {
     height: 'calc(100vh - 340px)',
     mode: 'ir',
     placeholder: '从一个标题、一个想法，或一段粘贴的资料开始...',
@@ -513,6 +552,18 @@ async function loadTags() {
   tags.value = await fetchTags()
 }
 
+async function loadNoteKinds() {
+  noteKinds.value = await fetchNoteKinds()
+}
+
+async function loadVditor() {
+  if (!VditorConstructor) {
+    await import('vditor/dist/index.css')
+    VditorConstructor = (await import('vditor')).default
+  }
+  return VditorConstructor
+}
+
 async function loadExistingNote() {
   const note = await fetchNote(Number(route.params.id))
   form.title = note.title
@@ -521,6 +572,7 @@ async function loadExistingNote() {
   form.type = note.type as NoteType
   form.status = note.status
   form.language = note.language ?? ''
+  form.noteKindId = note.noteKind?.id
   form.categoryId = note.category?.id
   form.tags = note.tags.map((tag: Tag) => tag.name)
   form.favorite = note.favorite
@@ -552,6 +604,7 @@ function loadImportedLinkDraft() {
     form.type = 'MARKDOWN'
     form.status = 'PUBLISHED'
     form.language = 'markdown'
+    form.noteKindId = undefined
     form.categoryId = draft.categoryId
     form.tags = draft.tags
     editor?.setValue(draft.content)

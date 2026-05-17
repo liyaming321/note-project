@@ -1,5 +1,6 @@
 package com.knowledgebase.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.knowledgebase.service.BackupService;
 import java.nio.file.Paths;
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
@@ -24,7 +25,7 @@ public class BackupRestoreInitializer implements ApplicationListener<Application
         if (restoreBackupPath == null || restoreBackupPath.isBlank()) {
             return;
         }
-        new BackupService(toProperties(environment)).restoreFromBackup(Paths.get(restoreBackupPath));
+        new BackupService(toProperties(environment), new ObjectMapper()).restoreFromBackup(Paths.get(restoreBackupPath));
     }
 
     /**

@@ -18,5 +18,28 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/vditor')) {
+            return 'vendor-vditor'
+          }
+          if (id.includes('node_modules/@ant-design/icons-vue')) {
+            return 'vendor-icons'
+          }
+          if (id.includes('node_modules/ant-design-vue')) {
+            return 'vendor-antd'
+          }
+          if (id.includes('node_modules/highlight.js')) {
+            return 'vendor-highlight'
+          }
+          if (id.includes('node_modules')) {
+            return 'vendor'
+          }
+        }
+      }
+    }
   }
 })

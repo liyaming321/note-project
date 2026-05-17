@@ -65,6 +65,8 @@ public class NoteHistoryService {
                 note.getContentText(),
                 note.getType().name(),
                 note.getLanguage(),
+                note.getNoteKind() == null ? null : note.getNoteKind().getId(),
+                note.getNoteKind() == null ? null : note.getNoteKind().getName(),
                 note.getCategory() == null ? null : note.getCategory().getId(),
                 note.getCategory() == null ? null : note.getCategory().getName(),
                 serializeTags(note.getTags())
@@ -155,6 +157,8 @@ public class NoteHistoryService {
                 history.getContentText(),
                 history.getType(),
                 history.getLanguage(),
+                history.getNoteKindId(),
+                history.getNoteKindName(),
                 history.getCategoryId(),
                 history.getCategoryName(),
                 deserializeTags(history.getTagNamesJson()),

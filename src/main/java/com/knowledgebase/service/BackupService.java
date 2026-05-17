@@ -1,9 +1,13 @@
 package com.knowledgebase.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.knowledgebase.config.KnowledgeBaseProperties;
+import com.knowledgebase.dto.AdminBackupInfoResponse;
 import com.knowledgebase.exception.BusinessException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileVisitResult;
@@ -30,22 +34,30 @@ public class BackupService {
 
     private static final DateTimeFormatter BACKUP_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final List<String> BACKUP_ROOTS = List.of("data", "index", "vector-index", "images");
+    private static final String METADATA_FILE_NAME = "backup-metadata.json";
 
+    private final ObjectMapper objectMapper;
     private final Path dataPath;
     private final Path indexPath;
     private final Path vectorIndexPath;
     private final Path imagesPath;
+    private final Path metadataPath;
+    private final String databaseFilePrefix;
 
     /**
      * 创建备份服务。
      *
      * @param properties 知识库配置
+     * @param objectMapper JSON 工具
      */
-    public BackupService(KnowledgeBaseProperties properties) {
+    public BackupService(KnowledgeBaseProperties properties, ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.dataPath = resolveDataDirectory(properties.getDataPath());
         this.indexPath = Paths.get(properties.getIndexPath()).toAbsolutePath().normalize();
         this.vectorIndexPath = Paths.get(properties.getVectorIndexPath()).toAbsolutePath().normalize();
         this.imagesPath = Paths.get(properties.getImagesPath()).toAbsolutePath().normalize();
+        this.metadataPath = dataPath.resolve(METADATA_FILE_NAME);
+        this.databaseFilePrefix = resolveDatabaseFilePrefix(properties.getDataPath());
     }
 
     /**
@@ -61,13 +73,53 @@ public class BackupService {
             addDirectory(zipOutputStream, vectorIndexPath, "vector-index");
             addDirectory(zipOutputStream, imagesPath, "images");
             zipOutputStream.finish();
+            byte[] content = outputStream.toByteArray();
+            String fileName = "knowledge-base-backup-" + BACKUP_TIME_FORMATTER.format(LocalDateTime.now()) + ".zip";
+            writeBackupMetadata(new BackupMetadata(
+                    fileName,
+                    content.length,
+                    LocalDateTime.now().toString(),
+                    sha256(content)
+            ));
             return new ExportedBackup(
-                    "knowledge-base-backup-" + BACKUP_TIME_FORMATTER.format(LocalDateTime.now()) + ".zip",
-                    outputStream.toByteArray()
+                    fileName,
+                    content
             );
         } catch (IOException ex) {
             throw new BusinessException("创建备份失败：" + ex.getMessage());
         }
+    }
+
+    /**
+     * 获取备份与数据目录健康信息。
+     *
+     * @return 备份健康信息
+     */
+    public AdminBackupInfoResponse info() {
+        BackupMetadata metadata = readBackupMetadata();
+        boolean dataReady = Files.isDirectory(dataPath);
+        boolean databasePresent = databaseFilesPresent();
+        boolean indexReady = Files.isDirectory(indexPath);
+        boolean vectorReady = Files.isDirectory(vectorIndexPath);
+        boolean imagesReady = Files.isDirectory(imagesPath);
+        boolean backupVerified = metadata != null && metadata.size() > 0 && metadata.checksum() != null && !metadata.checksum().isBlank();
+        boolean healthy = dataReady && indexReady && imagesReady;
+        String message = backupVerified
+                ? "最近备份已记录 SHA-256 校验值，可用于下载后比对"
+                : "还没有可校验的备份记录，建议先下载一次完整备份";
+        return new AdminBackupInfoResponse(
+                metadata == null ? "" : metadata.fileName(),
+                metadata == null ? 0L : metadata.size(),
+                metadata == null ? "" : metadata.createdAt(),
+                metadata == null ? "" : metadata.checksum(),
+                dataReady,
+                databasePresent,
+                indexReady,
+                vectorReady,
+                imagesReady,
+                healthy,
+                message
+        );
     }
 
     /**
@@ -284,11 +336,105 @@ public class BackupService {
     }
 
     /**
+     * 推导数据库文件前缀。
+     *
+     * @param configuredDataPath 配置的数据路径
+     * @return 数据库文件前缀
+     */
+    private String resolveDatabaseFilePrefix(String configuredDataPath) {
+        String dataPathValue = configuredDataPath;
+        if (dataPathValue == null || dataPathValue.isBlank()) {
+            dataPathValue = Paths.get(System.getProperty("user.home"), ".knowledge-base", "data", "knowledge-base").toString();
+        }
+        return Paths.get(dataPathValue).toAbsolutePath().normalize().getFileName().toString();
+    }
+
+    /**
+     * 判断数据库文件是否存在。
+     *
+     * @return 是否存在数据库文件
+     */
+    private boolean databaseFilesPresent() {
+        if (Files.notExists(dataPath)) {
+            return false;
+        }
+        try (var stream = Files.list(dataPath)) {
+            return stream
+                    .map(path -> path.getFileName().toString())
+                    .anyMatch(fileName -> fileName.startsWith(databaseFilePrefix)
+                            && (fileName.endsWith(".mv.db") || fileName.endsWith(".trace.db")));
+        } catch (IOException ex) {
+            return false;
+        }
+    }
+
+    /**
+     * 写入备份元数据。
+     *
+     * @param metadata 备份元数据
+     */
+    private void writeBackupMetadata(BackupMetadata metadata) {
+        try {
+            Files.createDirectories(metadataPath.getParent());
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(metadataPath.toFile(), metadata);
+        } catch (IOException ex) {
+            throw new BusinessException("记录备份元数据失败：" + ex.getMessage());
+        }
+    }
+
+    /**
+     * 读取备份元数据。
+     *
+     * @return 备份元数据
+     */
+    private BackupMetadata readBackupMetadata() {
+        if (Files.notExists(metadataPath)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(metadataPath.toFile(), BackupMetadata.class);
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * 计算 SHA-256 校验值。
+     *
+     * @param content 文件内容
+     * @return 校验值
+     */
+    private String sha256(byte[] content) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(content);
+            StringBuilder builder = new StringBuilder();
+            for (byte item : hash) {
+                builder.append(String.format("%02x", item));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new BusinessException("当前 JDK 不支持 SHA-256 校验");
+        }
+    }
+
+    /**
      * 导出的备份文件。
      *
      * @param fileName 文件名
      * @param content 文件内容
      */
     public record ExportedBackup(String fileName, byte[] content) {
+    }
+
+    /**
+     * 备份元数据。
+     *
+     * @param fileName 文件名
+     * @param size 文件大小
+     * @param createdAt 创建时间
+     * @param checksum SHA-256 校验值
+     */
+    private record BackupMetadata(String fileName, long size, String createdAt, String checksum) {
     }
 }

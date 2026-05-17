@@ -49,7 +49,7 @@
           <h3>标签</h3>
           <div class="sidebar-tag-cloud">
             <button
-              v-for="tag in tags"
+              v-for="tag in visibleSidebarTags"
               :key="tag.id"
               :class="['workspace-chip', { active: isCurrentNoteTag(tag.name) }]"
               type="button"
@@ -59,6 +59,14 @@
             </button>
             <a-empty v-if="tags.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无标签" />
           </div>
+          <button
+            v-if="hiddenSidebarTagCount > 0"
+            class="sidenav-more-button"
+            type="button"
+            @click="router.push({ path: '/settings', query: { panel: 'tags' } })"
+          >
+            还有 {{ hiddenSidebarTagCount }} 个标签
+          </button>
         </div>
       </nav>
 
@@ -148,7 +156,8 @@
                 <p class="hero-eyebrow">知识笔记</p>
                 <h1>{{ note.title }}</h1>
                 <div class="note-meta detail-meta">
-                  <a-tag class="blue-tag">{{ note.type === 'CODE' ? note.language || '代码' : 'Markdown' }}</a-tag>
+                  <a-tag class="blue-tag">{{ resolveContentFormatLabel(note.type, note.language) }}</a-tag>
+                  <a-tag v-if="note.noteKind" class="blue-tag subtle">{{ note.noteKind.name }}</a-tag>
                   <a-tag :class="['blue-tag', note.status === 'DRAFT' ? 'draft-tag' : 'subtle']">
                     {{ note.status === 'DRAFT' ? '草稿' : '已发布' }}
                   </a-tag>
@@ -174,6 +183,10 @@
                 <div class="summary-item">
                   <span>内容状态</span>
                   <strong>{{ resolveContentState() }}</strong>
+                </div>
+                <div v-if="note.noteKind" class="summary-item">
+                  <span>用途</span>
+                  <strong>{{ note.noteKind.name }}</strong>
                 </div>
                 <div v-if="note.summary" class="summary-item">
                   <span>笔记摘要</span>
@@ -269,6 +282,9 @@
                     >
                       {{ tag }}
                     </a-tag>
+                    <a-tag v-if="selectedHistory.noteKindName" class="blue-tag subtle">
+                      {{ selectedHistory.noteKindName }}
+                    </a-tag>
                     <a-tag v-if="selectedHistory.categoryName" class="blue-tag subtle">
                       {{ selectedHistory.categoryName }}
                     </a-tag>
@@ -284,7 +300,7 @@
                     </a-tag>
                   </template>
                 </div>
-                <div ref="previewRef" class="markdown-body"></div>
+                <div ref="previewRef" :class="['markdown-body', { 'plain-text-preview-container': isPlainTextPreview }]"></div>
               </template>
               <a-empty v-else description="笔记不存在" />
             </a-spin>
@@ -355,7 +371,6 @@ import {
   TagsOutlined
 } from '@ant-design/icons-vue'
 import { Empty, message, Modal } from 'ant-design-vue'
-import Vditor from 'vditor'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -378,6 +393,7 @@ import {
   revertNoteToHistory
 } from '@/api/knowledgeBase'
 import type { Category, NoteDetail, NoteHistoryDetail, NoteHistorySummary, NoteStatus, SimilarNote, Tag } from '@/types/api'
+import { isPlainTextFormat, resolveContentFormatLabel } from '@/utils/noteFormat'
 
 const route = useRoute()
 const router = useRouter()
@@ -388,6 +404,7 @@ type CategoryTreeNode = {
   children: CategoryTreeNode[]
 }
 type WorkspaceView = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
+const SIDEBAR_TAG_LIMIT = 12
 
 const loading = ref(false)
 const historyLoading = ref(false)
@@ -411,7 +428,16 @@ const categoryForm = reactive<{
 })
 const categoryTreeData = computed(() => toTreeData(categories.value))
 const flatCategories = computed(() => flattenCategories(categories.value))
+const visibleSidebarTags = computed(() => {
+  const currentNoteTagNames = new Set(note.value?.tags.map(tag => tag.name) ?? [])
+  const currentTags = tags.value.filter(tag => currentNoteTagNames.has(tag.name))
+  const remainingTags = tags.value.filter(tag => !currentNoteTagNames.has(tag.name))
+  return [...currentTags, ...remainingTags].slice(0, SIDEBAR_TAG_LIMIT)
+})
+const hiddenSidebarTagCount = computed(() => Math.max(tags.value.length - visibleSidebarTags.value.length, 0))
 const previewContent = computed(() => selectedHistory.value?.content ?? note.value?.content ?? '')
+const isPlainTextPreview = computed(() => isPlainTextFormat(selectedHistory.value?.type ?? note.value?.type))
+let VditorConstructor: typeof import('vditor')['default'] | undefined
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadTags(), loadNote()])
@@ -419,7 +445,9 @@ onMounted(async () => {
 watch(() => route.params.id, () => {
   void loadNote()
 })
-watch(previewContent, renderMarkdown)
+watch([previewContent, isPlainTextPreview], () => {
+  void renderPreview()
+})
 
 async function loadCategories() {
   categories.value = await fetchCategories()
@@ -493,7 +521,7 @@ function clearHistoryPreview() {
   selectedHistory.value = undefined
 }
 
-async function renderMarkdown() {
+async function renderPreview() {
   await nextTick()
   if (!previewRef.value) {
     return
@@ -502,7 +530,12 @@ async function renderMarkdown() {
     previewRef.value.innerHTML = ''
     return
   }
-  await Vditor.preview(previewRef.value, previewContent.value, {
+  if (isPlainTextPreview.value) {
+    renderPlainTextPreview()
+    return
+  }
+  const VditorClass = await loadVditor()
+  await VditorClass.preview(previewRef.value, previewContent.value, {
     mode: 'light',
     hljs: {
       enable: true,
@@ -510,6 +543,28 @@ async function renderMarkdown() {
     }
   })
   addCodeCopyButtons()
+}
+
+/**
+ * 渲染普通文本预览，避免 Markdown 语法被解释。
+ */
+function renderPlainTextPreview() {
+  if (!previewRef.value) {
+    return
+  }
+  previewRef.value.innerHTML = ''
+  const plainTextBlock = document.createElement('div')
+  plainTextBlock.className = 'plain-text-body'
+  plainTextBlock.textContent = previewContent.value
+  previewRef.value.appendChild(plainTextBlock)
+}
+
+async function loadVditor() {
+  if (!VditorConstructor) {
+    await import('vditor/dist/index.css')
+    VditorConstructor = (await import('vditor')).default
+  }
+  return VditorConstructor
 }
 
 async function toggleFavorite() {

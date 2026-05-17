@@ -46,10 +46,13 @@
         </div>
 
         <div class="sidenav-section">
-          <h3>标签</h3>
+          <div class="sidenav-section-title">
+            <h3>标签</h3>
+            <button v-if="tags.length > 0" type="button" @click="activePanel = 'tags'">管理</button>
+          </div>
           <div class="sidebar-tag-cloud">
             <button
-              v-for="tag in tags"
+              v-for="tag in visibleSidebarTags"
               :key="tag.id"
               class="workspace-chip"
               type="button"
@@ -59,6 +62,14 @@
             </button>
             <a-empty v-if="tags.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无标签" />
           </div>
+          <button
+            v-if="hiddenSidebarTagCount > 0"
+            class="sidenav-more-button"
+            type="button"
+            @click="activePanel = 'tags'"
+          >
+            还有 {{ hiddenSidebarTagCount }} 个标签
+          </button>
         </div>
       </nav>
 
@@ -138,6 +149,61 @@
           <span>
             <strong>向量索引</strong>
             <small>本地 Embedding</small>
+          </span>
+        </button>
+        <button
+          :class="['settings-function-item', { active: activePanel === 'tuning' }]"
+          type="button"
+          @click="activePanel = 'tuning'"
+        >
+          <BarChartOutlined />
+          <span>
+            <strong>搜索调优</strong>
+            <small>权重与反馈</small>
+          </span>
+        </button>
+        <button
+          :class="['settings-function-item', { active: activePanel === 'config' }]"
+          type="button"
+          @click="activePanel = 'config'"
+        >
+          <ApiOutlined />
+          <span>
+            <strong>配置中心</strong>
+            <small>模型与路径检查</small>
+          </span>
+        </button>
+        <button
+          :class="['settings-function-item', { active: activePanel === 'tags' }]"
+          type="button"
+          @click="activePanel = 'tags'"
+        >
+          <TagsOutlined />
+          <span>
+            <strong>标签管理</strong>
+            <small>删除与筛选</small>
+          </span>
+        </button>
+        <button
+          :class="['settings-function-item', { active: activePanel === 'noteKinds' }]"
+          type="button"
+          @click="activePanel = 'noteKinds'"
+        >
+          <AppstoreOutlined />
+          <span>
+            <strong>用途管理</strong>
+            <small>个人用途</small>
+          </span>
+        </button>
+        <button
+          :class="['settings-function-item', { active: activePanel === 'organize' }]"
+          type="button"
+          @click="activePanel = 'organize'"
+        >
+          <InboxOutlined />
+          <span>
+            <strong>待整理</strong>
+            <small>元数据建议</small>
           </span>
         </button>
         <button
@@ -300,16 +366,207 @@
             </p>
           </div>
 
+          <div v-else-if="activePanel === 'tuning'" class="settings-section-panel">
+            <div class="settings-section-heading">
+              <span>搜索调优</span>
+              <h2>混合搜索权重</h2>
+              <p>调整关键词、语义和轻量业务加权。反馈会保存在本地数据目录，方便之后复盘排序质量。</p>
+            </div>
+            <div v-if="searchTuning" class="tuning-grid">
+              <label v-for="item in tuningFields" :key="item.key" class="tuning-field">
+                <span>{{ item.label }}</span>
+                <a-input-number
+                  v-model:value="searchTuning[item.key]"
+                  :min="0"
+                  :max="item.max"
+                  :step="0.01"
+                />
+              </label>
+            </div>
+            <div class="settings-action-card">
+              <div>
+                <strong>保存搜索权重</strong>
+                <span>{{ searchTuning?.configPath || '本地搜索调优配置文件' }}</span>
+              </div>
+              <a-button type="primary" :loading="savingSearchTuning" @click="saveSearchTuning">保存权重</a-button>
+            </div>
+            <div v-if="searchFeedbackSummary" class="settings-grid health-grid">
+              <div>
+                <span>反馈总数</span>
+                <strong>{{ searchFeedbackSummary.totalCount }}</strong>
+              </div>
+              <div>
+                <span>有用</span>
+                <strong>{{ searchFeedbackSummary.usefulCount }}</strong>
+              </div>
+              <div>
+                <span>不相关</span>
+                <strong>{{ searchFeedbackSummary.irrelevantCount }}</strong>
+              </div>
+              <div>
+                <span>最近反馈</span>
+                <strong>{{ searchFeedbackSummary.recentItems.length }}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activePanel === 'config'" class="settings-section-panel">
+            <div class="settings-section-heading">
+              <span>配置中心</span>
+              <h2>本地模型与路径检查</h2>
+              <p>{{ configurationChecklist?.message || '检查 LLM、Embedding、数据目录和索引目录。' }}</p>
+            </div>
+            <div v-if="configurationChecklist" class="settings-grid config-grid">
+              <div v-for="item in configurationChecklist.items" :key="item.key">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.status }}</strong>
+                <small>{{ item.detail }}</small>
+              </div>
+            </div>
+            <div class="settings-action-card">
+              <div>
+                <strong>LLM Provider 连接测试</strong>
+                <span>{{ llmTestResult?.message || '会发送一条极短测试消息到所选供应商' }}</span>
+              </div>
+              <a-select v-model:value="llmTestProvider" class="llm-provider-select">
+                <a-select-option value="bailian">阿里百炼</a-select-option>
+                <a-select-option value="deepseek">DeepSeek</a-select-option>
+              </a-select>
+              <a-button :loading="testingLlm" @click="runLlmProviderTest">测试连接</a-button>
+            </div>
+            <p class="settings-note">
+              本地 Embedding 向导：准备 llama.cpp 的 embedding 可执行文件和 GGUF 模型后，配置 KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_EXECUTABLE、KNOWLEDGE_BASE_EMBEDDING_LOCAL_CLI_MODEL、维度与超时参数，再回到本页重建向量索引。
+            </p>
+          </div>
+
+          <div v-else-if="activePanel === 'tags'" class="settings-section-panel">
+            <div class="settings-section-heading">
+              <span>标签管理</span>
+              <h2>清理不再使用的标签</h2>
+              <p>删除标签会从所有笔记中移除该标签，但不会删除笔记本身。适合把临时、重复或误生成的标签清掉。</p>
+            </div>
+            <div class="tag-management-toolbar">
+              <div>
+                <strong>{{ tags.length }} 个标签</strong>
+                <span>侧栏只展示前 {{ SIDEBAR_TAG_LIMIT }} 个，完整列表在这里管理。</span>
+              </div>
+              <a-button @click="loadTags">刷新标签</a-button>
+            </div>
+            <div class="manager-list compact">
+              <div v-for="tag in tags" :key="tag.id" class="manager-row tag-manager-row">
+                <button class="workspace-chip" type="button" @click="goTagFilter(tag.name)">
+                  #{{ tag.name }}
+                </button>
+                <div>
+                  <a-button type="link" size="small" @click="goTagFilter(tag.name)">筛选</a-button>
+                  <a-popconfirm
+                    title="删除后会从所有笔记中移除此标签，确认继续？"
+                    ok-text="确认删除"
+                    cancel-text="取消"
+                    @confirm="removeTag(tag)"
+                  >
+                    <a-button danger type="link" size="small" :loading="deletingTagId === tag.id">删除</a-button>
+                  </a-popconfirm>
+                </div>
+              </div>
+              <a-empty v-if="tags.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无标签" />
+            </div>
+          </div>
+
+          <div v-else-if="activePanel === 'noteKinds'" class="settings-section-panel">
+            <div class="settings-section-heading">
+              <span>用途管理</span>
+              <h2>管理个人用途</h2>
+              <p>这里管理的是“日记、灵感、项目、资料”这类用途；Markdown / 代码 / 普通文本仍作为内容格式保留在编辑页更多属性里。</p>
+            </div>
+            <div class="manager-form note-kind-form">
+              <a-input v-model:value="noteKindForm.name" placeholder="用途名称，例如 日记 / 灵感 / 读书" />
+              <a-input-number v-model:value="noteKindForm.sortOrder" :min="0" placeholder="排序" />
+              <a-button type="primary" :loading="savingNoteKind" @click="saveNoteKind">
+                {{ editingNoteKindId ? '保存用途' : '新建用途' }}
+              </a-button>
+              <a-button v-if="editingNoteKindId" @click="resetNoteKindForm">取消编辑</a-button>
+            </div>
+            <div class="manager-list compact">
+              <div v-for="noteKind in noteKinds" :key="noteKind.id" class="manager-row tag-manager-row">
+                <span>
+                  {{ noteKind.name }}
+                  <small v-if="noteKind.builtIn">默认</small>
+                </span>
+                <div>
+                  <a-button type="link" size="small" @click="goNoteKindFilter(noteKind.id)">筛选</a-button>
+                  <a-button type="link" size="small" @click="editNoteKind(noteKind)">重命名</a-button>
+                  <a-popconfirm
+                    title="删除后会从所有笔记中移除此用途，笔记本身不会删除，确认继续？"
+                    ok-text="确认删除"
+                    cancel-text="取消"
+                    @confirm="removeNoteKind(noteKind)"
+                  >
+                    <a-button danger type="link" size="small" :loading="deletingNoteKindId === noteKind.id">删除</a-button>
+                  </a-popconfirm>
+                </div>
+              </div>
+              <a-empty v-if="noteKinds.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无用途" />
+            </div>
+          </div>
+
+          <div v-else-if="activePanel === 'organize'" class="settings-section-panel">
+            <div class="settings-section-heading">
+              <span>待整理</span>
+              <h2>知识整理工作流</h2>
+              <p>集中查看链接导入草稿、未分类、无标签、缺摘要和长期未更新的笔记，先给出建议，确认后再保存。</p>
+            </div>
+            <div class="settings-action-card">
+              <div>
+                <strong>打开待整理视图</strong>
+                <span>在工作台中逐篇确认、编辑或发布。</span>
+              </div>
+              <a-button type="primary" @click="goWorkspaceView('organize')">进入待整理</a-button>
+            </div>
+            <div class="organize-candidate-list">
+              <article v-for="candidate in organizeCandidates" :key="candidate.note.id" class="organize-candidate-card">
+                <div>
+                  <strong>{{ candidate.note.title }}</strong>
+                  <p>{{ candidate.reasons.join('，') }}</p>
+                  <small>建议标签：{{ candidate.suggestedTags.join('、') }} · 建议分类：{{ candidate.suggestedCategory }}</small>
+                </div>
+                <a-button size="small" @click="router.push(`/notes/${candidate.note.id}`)">查看</a-button>
+              </article>
+              <a-empty v-if="organizeCandidates.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无待整理候选" />
+            </div>
+            <p class="settings-note">
+              合并与拆分先按产品方案推进：合并前保存两个来源快照，拆分生成新笔记并保留原笔记历史，所有危险操作都需要二次确认与可撤销窗口。
+            </p>
+          </div>
+
           <div v-else-if="activePanel === 'backup'" class="settings-section-panel">
             <div class="settings-section-heading">
               <span>备份恢复</span>
               <h2>数据备份</h2>
               <p>备份文件会包含数据库、索引和图片目录。</p>
             </div>
+            <div v-if="backupInfo" class="settings-grid health-grid">
+              <div>
+                <span>最近备份</span>
+                <strong>{{ backupInfo.lastBackupFileName || '暂无' }}</strong>
+              </div>
+              <div>
+                <span>文件大小</span>
+                <strong>{{ formatFileSize(backupInfo.lastBackupSize) }}</strong>
+              </div>
+              <div>
+                <span>校验状态</span>
+                <strong>{{ backupInfo.lastBackupChecksum ? '已记录' : '待备份' }}</strong>
+              </div>
+              <div>
+                <span>目录健康</span>
+                <strong>{{ backupInfo.healthy ? '健康' : '需检查' }}</strong>
+              </div>
+            </div>
             <div class="settings-action-card">
               <div>
                 <strong>下载完整备份</strong>
-                <span>生成当前知识库的 ZIP 备份文件</span>
+                <span>{{ backupInfo?.message || '生成当前知识库的 ZIP 备份文件' }}</span>
               </div>
               <a-button type="primary" :loading="backingUp" @click="downloadBackup">下载备份</a-button>
             </div>
@@ -389,7 +646,10 @@
 
 <script setup lang="ts">
 import {
+  ApiOutlined,
+  AppstoreOutlined,
   ArrowLeftOutlined,
+  BarChartOutlined,
   ClockCircleOutlined,
   ClusterOutlined,
   DeleteOutlined,
@@ -400,35 +660,65 @@ import {
   QuestionCircleOutlined,
   SearchOutlined,
   SettingOutlined,
-  StarOutlined
+  StarOutlined,
+  TagsOutlined
 } from '@ant-design/icons-vue'
 import { Empty, message } from 'ant-design-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   cleanupVectorIndex,
   createCategory,
+  createNoteKind,
+  deleteNoteKind,
+  deleteTag,
   exportBackup,
+  fetchBackupInfo,
   fetchCategories,
+  fetchConfigurationChecklist,
   fetchEmbeddingProvider,
   fetchIndexHealth,
+  fetchNoteKinds,
+  fetchOrganizeCandidates,
+  fetchSearchFeedbackSummary,
+  fetchSearchTuning,
   fetchTags,
   fetchVectorIndexInfo,
   fetchWorkspaceInfo,
   rebuildSearchIndex,
-  rebuildVectorIndex
+  rebuildVectorIndex,
+  testLlmProvider,
+  updateNoteKind,
+  updateSearchTuning
 } from '@/api/knowledgeBase'
-import type { AdminIndexHealth, AdminVectorIndexInfo, AdminWorkspaceInfo, Category, EmbeddingProviderInfo, Tag } from '@/types/api'
+import type {
+  AdminBackupInfo,
+  AdminConfigurationChecklist,
+  AdminIndexHealth,
+  AdminVectorIndexInfo,
+  AdminWorkspaceInfo,
+  Category,
+  EmbeddingProviderInfo,
+  KnowledgeOrganizeCandidate,
+  LlmProviderTestResult,
+  NoteKind,
+  SearchFeedbackSummary,
+  SearchTuningSettings,
+  Tag
+} from '@/types/api'
 
 const router = useRouter()
+const route = useRoute()
 type CategoryTreeNode = {
   title: string
   value: number
   key: number
   children: CategoryTreeNode[]
 }
-type WorkspaceView = 'all' | 'recent' | 'favorite' | 'archived' | 'trash'
+type WorkspaceView = 'all' | 'recent' | 'favorite' | 'archived' | 'trash' | 'organize'
+type SearchTuningNumberKey = 'keywordWeight' | 'semanticWeight' | 'titleHitBoost' | 'tagHitBoost' | 'pinnedBoost' | 'favoriteBoost' | 'recentSevenDaysBoost' | 'recentThirtyDaysBoost'
+const SIDEBAR_TAG_LIMIT = 12
 
 const loading = ref(false)
 const backingUp = ref(false)
@@ -436,40 +726,91 @@ const reindexing = ref(false)
 const vectorReindexing = ref(false)
 const healthChecking = ref(false)
 const vectorCleaning = ref(false)
+const savingSearchTuning = ref(false)
+const testingLlm = ref(false)
 const savingCategory = ref(false)
+const savingNoteKind = ref(false)
+const deletingTagId = ref<number>()
+const deletingNoteKindId = ref<number>()
 const categoryManagerVisible = ref(false)
 const workspaceInfo = ref<AdminWorkspaceInfo>()
 const vectorIndexInfo = ref<AdminVectorIndexInfo>()
 const indexHealth = ref<AdminIndexHealth>()
 const embeddingProvider = ref<EmbeddingProviderInfo>()
+const searchTuning = ref<SearchTuningSettings>()
+const searchFeedbackSummary = ref<SearchFeedbackSummary>()
+const backupInfo = ref<AdminBackupInfo>()
+const configurationChecklist = ref<AdminConfigurationChecklist>()
+const llmTestResult = ref<LlmProviderTestResult>()
+const organizeCandidates = ref<KnowledgeOrganizeCandidate[]>([])
 const vectorCleanupMessage = ref('')
+const llmTestProvider = ref<'bailian' | 'deepseek'>('bailian')
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
-const activePanel = ref<'overview' | 'index' | 'vector' | 'backup' | 'help'>('overview')
+const noteKinds = ref<NoteKind[]>([])
+const editingNoteKindId = ref<number>()
+const activePanel = ref<'overview' | 'index' | 'vector' | 'tuning' | 'config' | 'tags' | 'noteKinds' | 'organize' | 'backup' | 'help'>('overview')
 const categoryForm = reactive<{
   name: string
   parentId?: number
 }>({
   name: ''
 })
+const noteKindForm = reactive<{
+  name: string
+  sortOrder?: number
+}>({
+  name: ''
+})
 const categoryTreeData = computed(() => toTreeData(categories.value))
 const flatCategories = computed(() => flattenCategories(categories.value))
+const visibleSidebarTags = computed(() => tags.value.slice(0, SIDEBAR_TAG_LIMIT))
+const hiddenSidebarTagCount = computed(() => Math.max(tags.value.length - visibleSidebarTags.value.length, 0))
+const tuningFields: Array<{ key: SearchTuningNumberKey; label: string; max: number }> = [
+  { key: 'keywordWeight', label: '关键词权重', max: 1 },
+  { key: 'semanticWeight', label: '语义权重', max: 1 },
+  { key: 'titleHitBoost', label: '标题命中', max: 0.5 },
+  { key: 'tagHitBoost', label: '标签命中', max: 0.5 },
+  { key: 'pinnedBoost', label: '置顶', max: 0.5 },
+  { key: 'favoriteBoost', label: '收藏', max: 0.5 },
+  { key: 'recentSevenDaysBoost', label: '近7天更新', max: 0.5 },
+  { key: 'recentThirtyDaysBoost', label: '近30天更新', max: 0.5 }
+]
 
 onMounted(async () => {
-  await Promise.all([loadWorkspaceInfo(), loadCategories(), loadTags()])
+  syncPanelFromRoute()
+  await Promise.all([loadWorkspaceInfo(), loadCategories(), loadTags(), loadNoteKinds()])
 })
+
+function syncPanelFromRoute() {
+  if (route.query.panel === 'tags') {
+    activePanel.value = 'tags'
+  } else if (route.query.panel === 'noteKinds') {
+    activePanel.value = 'noteKinds'
+  }
+}
 
 async function loadWorkspaceInfo() {
   loading.value = true
   try {
-    const [workspace, provider, vectorIndex] = await Promise.all([
+    const [workspace, provider, vectorIndex, tuning, feedback, backup, checklist, organizePage] = await Promise.all([
       fetchWorkspaceInfo(),
       fetchEmbeddingProvider(),
-      fetchVectorIndexInfo()
+      fetchVectorIndexInfo(),
+      fetchSearchTuning(),
+      fetchSearchFeedbackSummary(),
+      fetchBackupInfo(),
+      fetchConfigurationChecklist(),
+      fetchOrganizeCandidates(0, 6)
     ])
     workspaceInfo.value = workspace
     embeddingProvider.value = provider
     vectorIndexInfo.value = vectorIndex
+    searchTuning.value = tuning
+    searchFeedbackSummary.value = feedback
+    backupInfo.value = backup
+    configurationChecklist.value = checklist
+    organizeCandidates.value = organizePage.items
   } catch (error) {
     message.error((error as Error).message)
   } finally {
@@ -535,10 +876,42 @@ async function downloadBackup() {
   backingUp.value = true
   try {
     await exportBackup()
+    backupInfo.value = await fetchBackupInfo()
   } catch (error) {
     message.error((error as Error).message)
   } finally {
     backingUp.value = false
+  }
+}
+
+async function saveSearchTuning() {
+  if (!searchTuning.value) {
+    return
+  }
+  savingSearchTuning.value = true
+  try {
+    searchTuning.value = await updateSearchTuning(searchTuning.value)
+    message.success('搜索调优配置已保存')
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    savingSearchTuning.value = false
+  }
+}
+
+async function runLlmProviderTest() {
+  testingLlm.value = true
+  try {
+    llmTestResult.value = await testLlmProvider(llmTestProvider.value)
+    if (llmTestResult.value.success) {
+      message.success(llmTestResult.value.message)
+    } else {
+      message.warning(llmTestResult.value.message)
+    }
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    testingLlm.value = false
   }
 }
 
@@ -550,8 +923,89 @@ async function loadTags() {
   tags.value = await fetchTags()
 }
 
+async function loadNoteKinds() {
+  noteKinds.value = await fetchNoteKinds()
+}
+
+async function removeTag(tag: Tag) {
+  deletingTagId.value = tag.id
+  try {
+    await deleteTag(tag.id)
+    message.success(`已删除标签：${tag.name}`)
+    await loadTags()
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    deletingTagId.value = undefined
+  }
+}
+
+function editNoteKind(noteKind: NoteKind) {
+  editingNoteKindId.value = noteKind.id
+  noteKindForm.name = noteKind.name
+  noteKindForm.sortOrder = noteKind.sortOrder
+}
+
+function resetNoteKindForm() {
+  editingNoteKindId.value = undefined
+  noteKindForm.name = ''
+  noteKindForm.sortOrder = undefined
+}
+
+async function saveNoteKind() {
+  if (!noteKindForm.name.trim()) {
+    message.warning('请输入用途名称')
+    return
+  }
+  savingNoteKind.value = true
+  try {
+    if (editingNoteKindId.value) {
+      await updateNoteKind(editingNoteKindId.value, noteKindForm.name.trim(), noteKindForm.sortOrder)
+      message.success('用途已更新')
+    } else {
+      await createNoteKind(noteKindForm.name.trim(), noteKindForm.sortOrder)
+      message.success('用途已创建')
+    }
+    resetNoteKindForm()
+    await loadNoteKinds()
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    savingNoteKind.value = false
+  }
+}
+
+async function removeNoteKind(noteKind: NoteKind) {
+  deletingNoteKindId.value = noteKind.id
+  try {
+    await deleteNoteKind(noteKind.id)
+    message.success(`已删除用途：${noteKind.name}`)
+    if (editingNoteKindId.value === noteKind.id) {
+      resetNoteKindForm()
+    }
+    await loadNoteKinds()
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    deletingNoteKindId.value = undefined
+  }
+}
+
 function goWorkspaceView(view: WorkspaceView) {
   router.push({ path: '/', query: view === 'all' ? {} : { view } })
+}
+
+function formatFileSize(size: number) {
+  if (!size) {
+    return '暂无'
+  }
+  if (size < 1024) {
+    return `${size} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 function goCategoryFilter(categoryId: number) {
@@ -560,6 +1014,10 @@ function goCategoryFilter(categoryId: number) {
 
 function goTagFilter(tagName: string) {
   router.push({ path: '/', query: { mode: 'search', tag: tagName } })
+}
+
+function goNoteKindFilter(noteKindId: number) {
+  router.push({ path: '/', query: { noteKindId: String(noteKindId) } })
 }
 
 function openCategoryManager() {

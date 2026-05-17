@@ -1,5 +1,4 @@
 import 'ant-design-vue/dist/reset.css'
-import 'vditor/dist/index.css'
 import 'highlight.js/styles/github.css'
 import './styles.css'
 

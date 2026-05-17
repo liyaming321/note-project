@@ -8,6 +8,7 @@ import com.knowledgebase.dto.LlmProviderResponse;
 import com.knowledgebase.dto.LlmSummaryRequest;
 import com.knowledgebase.dto.LlmSummaryResponse;
 import com.knowledgebase.entity.Category;
+import com.knowledgebase.entity.NoteType;
 import com.knowledgebase.exception.BusinessException;
 import com.knowledgebase.repository.CategoryRepository;
 import com.knowledgebase.util.MarkdownTextExtractor;
@@ -98,11 +99,7 @@ public class LlmSummaryService {
      * @return 提示词
      */
     private String buildPrompt(LlmSummaryRequest request) {
-        String contentText = request.type() == null
-                ? request.content()
-                : MarkdownTextExtractor.extract(request.content());
-        String safeContent = limitText(contentText == null || contentText.isBlank() ? request.content() : contentText,
-                MAX_CONTENT_LENGTH);
+        String safeContent = limitText(normalizeContentForSummary(request.type(), request.content()), MAX_CONTENT_LENGTH);
         String categories = availableCategoryNames(request.categoryNames());
         return """
                 请根据下面的知识库笔记内容生成整理建议。
@@ -115,7 +112,7 @@ public class LlmSummaryService {
 
                 候选分类：%s
                 原标题：%s
-                笔记类型：%s
+                内容格式：%s
                 代码语言：%s
 
                 笔记内容：
@@ -123,10 +120,41 @@ public class LlmSummaryService {
                 """.formatted(
                 categories,
                 safeText(request.title()),
-                request.type(),
+                resolveContentFormatLabel(request.type()),
                 safeText(request.language()),
                 safeContent
         );
+    }
+
+    /**
+     * 根据内容格式生成用于总结的正文文本。
+     *
+     * @param type 内容格式
+     * @param content 原始内容
+     * @return 供 LLM 使用的正文
+     */
+    private String normalizeContentForSummary(NoteType type, String content) {
+        String safeContent = safeText(content);
+        if (type == NoteType.MARKDOWN) {
+            return MarkdownTextExtractor.extract(safeContent);
+        }
+        return safeContent;
+    }
+
+    /**
+     * 获取内容格式展示名称。
+     *
+     * @param type 内容格式
+     * @return 展示名称
+     */
+    private String resolveContentFormatLabel(NoteType type) {
+        if (type == NoteType.CODE) {
+            return "代码";
+        }
+        if (type == NoteType.TEXT) {
+            return "普通文本";
+        }
+        return "Markdown";
     }
 
     /**
